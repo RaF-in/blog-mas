@@ -94,5 +94,29 @@ class TestWriterFailure:
             "revision_feedback": None,
         }
 
-        with pytest.raises(ConnectionError, match="down"):
+        with pytest.raises(RuntimeError, match="Writer failed"):
+            await write_node(state, config=make_config(llm))
+
+    @pytest.mark.asyncio
+    async def test_raises_on_missing_blog_spec(self):
+        llm = make_mock_llm(_make_draft())
+        state = {
+            "blog_spec": None,
+            "research_summary": _make_research_summary(),
+            "revision_feedback": None,
+        }
+
+        with pytest.raises(ValueError, match="no blog spec"):
+            await write_node(state, config=make_config(llm))
+
+    @pytest.mark.asyncio
+    async def test_raises_on_missing_research_summary(self):
+        llm = make_mock_llm(_make_draft())
+        state = {
+            "blog_spec": _make_blog_spec(),
+            "research_summary": None,
+            "revision_feedback": None,
+        }
+
+        with pytest.raises(ValueError, match="no research summary"):
             await write_node(state, config=make_config(llm))

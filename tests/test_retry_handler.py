@@ -151,7 +151,9 @@ class TestErrorTypes:
 
 class TestRetryOutput:
     @pytest.mark.asyncio
-    async def test_prints_retry_status_on_each_attempt(self, capsys):
+    async def test_logs_retry_status_on_each_attempt(self, caplog):
+        import logging
+
         call_count = 0
 
         async def fail_once_then_succeed():
@@ -161,10 +163,10 @@ class TestRetryOutput:
                 raise ConnectionError("network down")
             return "ok"
 
-        await retry_handler(
-            fail_once_then_succeed, "TestAgent", base_delay=0.01
-        )
+        with caplog.at_level(logging.WARNING):
+            await retry_handler(
+                fail_once_then_succeed, "TestAgent", base_delay=0.01
+            )
 
-        captured = capsys.readouterr()
-        assert "[Retry] Attempt 2/3 for TestAgent" in captured.out
-        assert "retrying in" in captured.out
+        assert any("Attempt 2/3 for TestAgent" in record.message for record in caplog.records)
+        assert any("retrying in" in record.message for record in caplog.records)

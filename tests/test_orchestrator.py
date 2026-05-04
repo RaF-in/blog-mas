@@ -8,7 +8,12 @@ from blog_mas.mcp.models import (
     ResearchSummary,
     ValidationVerdict,
 )
-from blog_mas.orchestrator import MAX_REVISIONS, build_graph, should_continue
+from blog_mas.orchestrator import (
+    MAX_REVISIONS,
+    build_graph,
+    run_pipeline_async,
+    should_continue,
+)
 from tests.conftest import make_failing_llm, make_mock_llm_sequence
 
 
@@ -42,7 +47,6 @@ _INITIAL_STATE = {
     "verdict": None,
     "revision_feedback": None,
     "revision_count": 0,
-    "error": None,
 }
 
 
@@ -139,8 +143,70 @@ class TestAgentFailure:
         llm = make_failing_llm(ConnectionError("timeout"))
 
         graph = build_graph()
-        with pytest.raises(ConnectionError, match="timeout"):
+        with pytest.raises(RuntimeError, match="Intake failed"):
             await graph.ainvoke(
                 _INITIAL_STATE,
                 config={"configurable": {"llm": llm}},
             )
+
+
+class TestRunPipelineAsync:
+    @pytest.mark.asyncio
+    async def test_success_path_returns_success_with_draft(self):
+        llm = make_mock_llm_sequence([
+            _spec(),
+            _research_summary(),
+            _draft(),
+            ValidationVerdict(verdict="pass", reason="All good"),
+        ])
+
+        result = await run_pipeline_async(
+            raw_input="Write about Mediterranean diet", llm=llm
+        )
+        assert result["success"] is True
+        assert result["draft"].title == "Mediterranean Diet Guide"
+
+    @pytest.mark.asyncio
+    async def test_empty_input_returns_error(self):
+        result = await run_pipeline_async(raw_input="   ", llm=None)
+        assert result["success"] is False
+        assert "empty" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_none_input_returns_error(self):
+        result = await run_pipeline_async(raw_input=None, blog_spec=None, llm=None)
+        assert result["success"] is False
+        assert "empty" in result["error"].lower()
+
+    @pytest.mark.asyncio
+    async def test_value_error_returns_configuration_error(self):
+        result = await run_pipeline_async(
+            raw_input="test", llm=None
+        )
+        assert result["success"] is False
+        assert result["error"] == "Pipeline configuration error"
+
+    @pytest.mark.asyncio
+    async def test_runtime_error_from_retry_exhaustion(self):
+        llm = make_failing_llm(ConnectionError("network down"))
+
+        result = await run_pipeline_async(
+            raw_input="Write about Mediterranean diet", llm=llm
+        )
+        assert result["success"] is False
+        assert "LLM call failed" in result["error"]
+
+    @pytest.mark.asyncio
+    async def test_generic_exception_returns_unexpected_error(self):
+        from unittest.mock import AsyncMock, patch
+
+        with patch("blog_mas.orchestrator.build_graph") as mock_build:
+            mock_graph = AsyncMock()
+            mock_graph.ainvoke.side_effect = TypeError("unexpected type issue")
+            mock_build.return_value = mock_graph
+
+            result = await run_pipeline_async(
+                raw_input="test", llm=None
+            )
+            assert result["success"] is False
+            assert result["error"] == "Unexpected error"

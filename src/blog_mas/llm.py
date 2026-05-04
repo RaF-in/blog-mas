@@ -1,9 +1,14 @@
 """LLM factory: creates a ChatHuggingFace instance for the pipeline."""
 
+import logging
+import os
+
 from dotenv import load_dotenv
 from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -23,8 +28,6 @@ def create_llm(
     Returns:
         A ChatHuggingFace instance ready for .with_structured_output().
     """
-    import os
-
     token = api_key or os.environ.get("HF_TOKEN")
     endpoint = HuggingFaceEndpoint(
         repo_id=model or DEFAULT_MODEL,

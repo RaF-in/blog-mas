@@ -19,4 +19,3 @@ class BlogState(TypedDict):
     verdict: ValidationVerdict | None
     revision_feedback: str | None
     revision_count: Annotated[int, operator.add]
-    error: str | None

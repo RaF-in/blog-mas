@@ -1,22 +1,28 @@
 """Validator agent: fact-checks a blog draft against the research summary."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.output_parsers import PydanticOutputParser
+import logging
+
 from langchain_core.runnables import RunnableConfig
 
-from blog_mas.mcp.models import ValidationVerdict
+from blog_mas.agent_helpers import run_agent_chain
+from blog_mas.mcp.models import ValidationInput, ValidationVerdict
 from blog_mas.prompts import VALIDATOR_SYSTEM_PROMPT
 from blog_mas.state import BlogState
+
+logger = logging.getLogger(__name__)
 
 
 async def validate_node(state: BlogState, config: RunnableConfig) -> dict:
     """Fact-check the draft against the research summary and return a verdict."""
-    llm = config["configurable"]["llm"]
-    parser = PydanticOutputParser(pydantic_object=ValidationVerdict)
-    chain = llm | parser
+    research_summary = state.get("research_summary")
+    if research_summary is None:
+        raise ValueError("[Validator] Upstream agent failed — no research summary in state")
 
-    research_summary = state["research_summary"]
-    draft = state["draft"]
+    draft = state.get("draft")
+    if draft is None:
+        raise ValueError("[Validator] Upstream agent failed — no draft in state")
+
+    ValidationInput(research_summary=research_summary, draft=draft)
 
     bullet_text = "\n".join(f"- {bp}" for bp in research_summary.bullet_points)
     user_message = (
@@ -24,21 +30,20 @@ async def validate_node(state: BlogState, config: RunnableConfig) -> dict:
         f"DRAFT:\n{draft.body}"
     )
 
-    system_prompt = VALIDATOR_SYSTEM_PROMPT + "\n\n" + parser.get_format_instructions()
-
-    print("[Validator] Fact-checking draft against research...")
-    verdict = await chain.ainvoke(
-        [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ]
+    logger.info("[Validator] Fact-checking draft against research...")
+    verdict = await run_agent_chain(
+        config=config,
+        model_cls=ValidationVerdict,
+        system_prompt=VALIDATOR_SYSTEM_PROMPT,
+        user_message=user_message,
+        agent_name="Validator",
     )
 
     if verdict.verdict == "pass":
-        print("[Validator] Verdict: PASS")
+        logger.info("[Validator] Verdict: PASS")
         return {"verdict": verdict}
     else:
-        print(f'[Validator] Verdict: FAIL — "{verdict.reason}"')
+        logger.info('[Validator] Verdict: FAIL — "%s"', verdict.reason)
         return {
             "verdict": verdict,
             "revision_feedback": verdict.reason,

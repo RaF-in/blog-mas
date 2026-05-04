@@ -1,12 +1,18 @@
 """Orchestrator: LangGraph StateGraph with revision loop."""
 
+import asyncio
+import logging
+
 from langgraph.graph import END, StateGraph
+from pydantic import ValidationError
 
 from blog_mas.agents.intake import intake_node
 from blog_mas.agents.researcher import research_node
 from blog_mas.agents.validator import validate_node
 from blog_mas.agents.writer import write_node
 from blog_mas.state import BlogState
+
+logger = logging.getLogger(__name__)
 
 MAX_REVISIONS = 3
 
@@ -18,9 +24,10 @@ def should_continue(state: BlogState) -> str:
         return "end"
     if state.get("revision_count", 0) >= MAX_REVISIONS:
         return "end"
-    print(
-        f"[Orchestrator] Requesting revision "
-        f"(attempt {state['revision_count']} of {MAX_REVISIONS})..."
+    logger.info(
+        "[Orchestrator] Requesting revision "
+        "(attempt %d of %d)...",
+        state["revision_count"], MAX_REVISIONS,
     )
     return "retry"
 
@@ -54,10 +61,8 @@ def run_pipeline(
     max_retries: int = 3,
     base_delay: float = 2,
 ):
-    """Sync wrapper kept for backward-compat with tests. Delegates to async."""
-    import asyncio
-
-    return asyncio.get_event_loop().run_until_complete(
+    """Sync wrapper. Delegates to async."""
+    return asyncio.run(
         run_pipeline_async(
             blog_spec=blog_spec,
             raw_input=raw_input,
@@ -72,6 +77,12 @@ async def run_pipeline_async(
     llm=None,
 ) -> dict:
     """Run the full pipeline via LangGraph and return a result dict."""
+    if raw_input is not None and not raw_input.strip():
+        return {"success": False, "error": "Input cannot be empty"}
+
+    if blog_spec is None and (raw_input is None or not raw_input.strip()):
+        return {"success": False, "error": "Input cannot be empty"}
+
     graph = build_graph()
 
     initial_state = {
@@ -82,27 +93,38 @@ async def run_pipeline_async(
         "verdict": None,
         "revision_feedback": None,
         "revision_count": 0,
-        "error": None,
     }
 
     config = {"configurable": {"llm": llm}}
 
     try:
         final_state = await graph.ainvoke(initial_state, config=config)
-    except Exception as e:
-        return {"success": False, "error": str(e)}
+    except ValidationError as e:
+        logger.error("Parse error: %s", e)
+        return {"success": False, "error": "Failed to parse agent output"}
+    except RuntimeError as e:
+        logger.error("LLM call failed: %s", e)
+        return {"success": False, "error": "LLM call failed after retries"}
+    except ValueError as e:
+        logger.error("Pipeline configuration error: %s", e)
+        return {"success": False, "error": "Pipeline configuration error"}
+    except ConnectionError as e:
+        logger.error("Network error: %s", e)
+        return {"success": False, "error": "Network error. Please try again."}
+    except Exception:
+        logger.exception("Unexpected pipeline error")
+        return {"success": False, "error": "Unexpected error"}
 
     verdict = final_state.get("verdict")
     draft = final_state.get("draft")
 
     if verdict and verdict.verdict == "pass" and draft:
-        print("[Orchestrator] Validation PASSED.")
+        logger.info("[Orchestrator] Validation PASSED.")
         return {"success": True, "draft": draft}
 
-    revision_count = final_state.get("revision_count", 0)
     error_msg = (
         f"Failed to produce validated content after {MAX_REVISIONS} revisions. "
         "Please try again."
     )
-    print(error_msg)
+    logger.warning(error_msg)
     return {"success": False, "error": error_msg}

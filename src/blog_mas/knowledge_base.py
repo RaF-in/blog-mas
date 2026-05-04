@@ -143,8 +143,14 @@ _KNOWLEDGE_BASE: dict[str, str] = {
 }
 
 
+def get_available_topics() -> list[str]:
+    return list(_KNOWLEDGE_BASE.keys())
+
+
 def lookup_topic(query: str) -> str | None:
-    query_lower = query.lower()
+    if not query or not query.strip():
+        return None
+    query_lower = query.lower().strip()
     # Exact case-insensitive match first
     for topic, content in _KNOWLEDGE_BASE.items():
         if topic.lower() == query_lower:

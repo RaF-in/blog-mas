@@ -3,6 +3,8 @@
 import asyncio
 
 from blog_mas.llm import create_llm
+from blog_mas.logging_config import setup_logging
+from blog_mas.knowledge_base import get_available_topics
 from blog_mas.orchestrator import run_pipeline_async
 
 MAX_INPUT_LENGTH = 500
@@ -14,14 +16,7 @@ def print_welcome():
     print("=" * 50)
     print()
     print("Available topics:")
-    topics = [
-        "Mediterranean diet",
-        "Artificial intelligence",
-        "Climate change",
-        "Space exploration",
-        "Mental health",
-    ]
-    for t in topics:
+    for t in get_available_topics():
         print(f"  - {t}")
     print()
     print("Type 'exit' or 'quit' to end the session.")
@@ -92,6 +87,7 @@ async def async_main(llm=None):
 
 
 def main():
+    setup_logging()
     asyncio.run(async_main())
 
 

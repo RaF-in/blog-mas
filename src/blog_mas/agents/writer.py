@@ -1,31 +1,41 @@
 """Writer agent: generates or revises a blog post draft from research + spec."""
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.output_parsers import PydanticOutputParser
+import logging
+
 from langchain_core.runnables import RunnableConfig
 
-from blog_mas.mcp.models import BlogDraft
+from blog_mas.agent_helpers import run_agent_chain, sanitize_feedback
+from blog_mas.mcp.models import BlogDraft, WriterInput
 from blog_mas.prompts import WRITER_REVISION_SYSTEM_PROMPT, WRITER_SYSTEM_PROMPT
 from blog_mas.state import BlogState
+
+logger = logging.getLogger(__name__)
 
 
 async def write_node(state: BlogState, config: RunnableConfig) -> dict:
     """Generate or revise a blog post draft and return a BlogDraft."""
-    llm = config["configurable"]["llm"]
-    parser = PydanticOutputParser(pydantic_object=BlogDraft)
-    chain = llm | parser
+    blog_spec = state.get("blog_spec")
+    if blog_spec is None:
+        raise ValueError("[Writer] Upstream agent failed — no blog spec in state")
 
-    blog_spec = state["blog_spec"]
-    research_summary = state["research_summary"]
+    research_summary = state.get("research_summary")
+    if research_summary is None:
+        raise ValueError("[Writer] Upstream agent failed — no research summary in state")
+
     revision_feedback = state.get("revision_feedback")
     is_revision = revision_feedback is not None
 
+    WriterInput(
+        research_summary=research_summary,
+        blog_spec=blog_spec,
+        revision_feedback=revision_feedback,
+    )
+
     if is_revision:
-        system_prompt = WRITER_REVISION_SYSTEM_PROMPT.format(feedback=revision_feedback)
+        clean_feedback = sanitize_feedback(revision_feedback)
+        system_prompt = WRITER_REVISION_SYSTEM_PROMPT.format(feedback=clean_feedback)
     else:
         system_prompt = WRITER_SYSTEM_PROMPT
-
-    system_prompt += "\n\n" + parser.get_format_instructions()
 
     lines = ["Research summary:"]
     for bp in research_summary.bullet_points:
@@ -41,15 +51,16 @@ async def write_node(state: BlogState, config: RunnableConfig) -> dict:
     user_message = "\n".join(lines)
 
     if is_revision:
-        print("[Writer] Revising draft based on feedback...")
+        logger.info("[Writer] Revising draft based on feedback...")
     else:
-        print("[Writer] Drafting blog post...")
+        logger.info("[Writer] Drafting blog post...")
 
-    draft = await chain.ainvoke(
-        [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ]
+    draft = await run_agent_chain(
+        config=config,
+        model_cls=BlogDraft,
+        system_prompt=system_prompt,
+        user_message=user_message,
+        agent_name="Writer",
     )
 
     return {"draft": draft}

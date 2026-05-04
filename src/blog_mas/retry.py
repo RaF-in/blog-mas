@@ -1,6 +1,9 @@
 """Async retry handler with exponential backoff."""
 
 import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 async def retry_handler(callable, agent_name, max_retries=3, base_delay=2):
@@ -18,5 +21,8 @@ async def retry_handler(callable, agent_name, max_retries=3, base_delay=2):
                 ) from last_exception
             delay = base_delay * (2 ** attempt)
             retry_number = attempt + 1
-            print(f"[Retry] Attempt {retry_number + 1}/{max_retries} for {agent_name} — retrying in {delay}s...")
+            logger.warning(
+                "Attempt %d/%d for %s — retrying in %.1fs...",
+                retry_number + 1, max_retries, agent_name, delay,
+            )
             await asyncio.sleep(delay)

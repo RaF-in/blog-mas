@@ -98,11 +98,41 @@ class TestValidatorFailure:
     async def test_raises_on_llm_failure(self):
         llm = make_failing_llm(ConnectionError("down"))
 
-        with pytest.raises(ConnectionError, match="down"):
+        with pytest.raises(RuntimeError, match="Validator failed"):
             await validate_node(
                 {
                     "research_summary": _make_research_summary(),
                     "draft": _make_draft(),
+                },
+                config=make_config(llm),
+            )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_missing_research_summary(self):
+        llm = make_mock_llm(
+            ValidationVerdict(verdict="pass", reason="ok")
+        )
+
+        with pytest.raises(ValueError, match="no research summary"):
+            await validate_node(
+                {
+                    "research_summary": None,
+                    "draft": _make_draft(),
+                },
+                config=make_config(llm),
+            )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_missing_draft(self):
+        llm = make_mock_llm(
+            ValidationVerdict(verdict="pass", reason="ok")
+        )
+
+        with pytest.raises(ValueError, match="no draft"):
+            await validate_node(
+                {
+                    "research_summary": _make_research_summary(),
+                    "draft": None,
                 },
                 config=make_config(llm),
             )

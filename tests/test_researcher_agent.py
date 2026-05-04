@@ -82,8 +82,20 @@ class TestResearcherAgentFailure:
     async def test_raises_on_llm_failure(self):
         llm = make_failing_llm(ConnectionError("down"))
 
-        with pytest.raises(ConnectionError, match="down"):
+        with pytest.raises(RuntimeError, match="Researcher failed"):
             await research_node(
                 {"blog_spec": _make_blog_spec()},
+                config=make_config(llm),
+            )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_missing_blog_spec(self):
+        llm = make_mock_llm(
+            ResearchSummary(topic="AI", bullet_points=["p1"], source="kb")
+        )
+
+        with pytest.raises(ValueError, match="no blog spec"):
+            await research_node(
+                {"blog_spec": None},
                 config=make_config(llm),
             )

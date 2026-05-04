@@ -20,31 +20,36 @@ from blog_mas.mcp.models import (
 
 class TestCreateMcpMessage:
     def test_creates_valid_envelope_with_all_four_fields(self):
-        result = create_mcp_message(sender="TestAgent", content={"key": "value"})
-        assert result["protocol_version"] == "1.0"
-        assert result["sender"] == "TestAgent"
-        assert result["content"] == {"key": "value"}
-        assert result["metadata"] == {}
+        result = create_mcp_message(sender="test-agent", content={"key": "value"})
+        assert result.protocol_version == "1.0"
+        assert result.sender == "test-agent"
+        assert result.content == {"key": "value"}
+        assert result.metadata == {}
 
     def test_defaults_metadata_to_empty_dict(self):
-        result = create_mcp_message(sender="TestAgent", content="hello")
-        assert result["metadata"] == {}
+        result = create_mcp_message(sender="test-agent", content="hello")
+        assert result.metadata == {}
 
     def test_protocol_version_always_1_0(self):
-        result = create_mcp_message(sender="A", content=None)
-        assert result["protocol_version"] == "1.0"
+        result = create_mcp_message(sender="agent-a", content=None)
+        assert result.protocol_version == "1.0"
 
     def test_no_mutable_default_aliasing_across_calls(self):
-        r1 = create_mcp_message(sender="A", content="x")
-        r2 = create_mcp_message(sender="B", content="y")
-        r1["metadata"]["foo"] = "bar"
-        assert r2["metadata"] == {}
+        r1 = create_mcp_message(sender="agent-a", content="x")
+        r2 = create_mcp_message(sender="agent-b", content="y")
+        r1.metadata["foo"] = "bar"
+        assert r2.metadata == {}
 
     def test_accepts_custom_metadata(self):
         result = create_mcp_message(
-            sender="A", content="x", metadata={"task_id": "abc"}
+            sender="agent-a", content="x", metadata={"task_id": "abc"}
         )
-        assert result["metadata"] == {"task_id": "abc"}
+        assert result.metadata == {"task_id": "abc"}
+
+    def test_returns_mcp_envelope_instance(self):
+        from blog_mas.mcp.protocol import MCPEnvelope
+        result = create_mcp_message(sender="agent-a", content="hello")
+        assert isinstance(result, MCPEnvelope)
 
 
 # --- MCP Envelope Validator ---
@@ -52,41 +57,42 @@ class TestCreateMcpMessage:
 
 class TestValidateMcpEnvelope:
     def test_returns_true_for_valid_envelope(self):
-        msg = create_mcp_message(sender="Agent", content={})
-        assert validate_mcp_envelope(msg) is True
+        msg = create_mcp_message(sender="agent", content={})
+        assert validate_mcp_envelope(msg.model_dump()) is True
 
-    def test_returns_false_when_message_is_none(self, capsys):
+    def test_returns_false_when_message_is_none(self):
         assert validate_mcp_envelope(None) is False
-        assert "Message is not a dictionary" in capsys.readouterr().out
 
-    def test_returns_false_when_message_is_string(self, capsys):
+    def test_returns_false_when_message_is_string(self):
         assert validate_mcp_envelope("not a dict") is False
-        assert "Message is not a dictionary" in capsys.readouterr().out
 
-    def test_returns_false_when_protocol_version_missing(self, capsys):
-        msg = {"sender": "A", "content": {}, "metadata": {}}
+    def test_returns_false_when_protocol_version_missing(self):
+        msg = {"sender": "agent", "content": {}, "metadata": {}}
         assert validate_mcp_envelope(msg) is False
-        assert "Missing key" in capsys.readouterr().out
 
-    def test_returns_false_when_sender_missing(self, capsys):
+    def test_returns_false_when_sender_missing(self):
         msg = {"protocol_version": "1.0", "content": {}, "metadata": {}}
         assert validate_mcp_envelope(msg) is False
-        assert "Missing key" in capsys.readouterr().out
 
-    def test_returns_false_when_content_missing(self, capsys):
-        msg = {"protocol_version": "1.0", "sender": "A", "metadata": {}}
+    def test_returns_false_when_content_missing(self):
+        msg = {"protocol_version": "1.0", "sender": "agent", "metadata": {}}
         assert validate_mcp_envelope(msg) is False
-        assert "Missing key" in capsys.readouterr().out
 
-    def test_returns_false_when_metadata_missing(self, capsys):
-        msg = {"protocol_version": "1.0", "sender": "A", "content": {}}
+    def test_returns_false_when_metadata_missing(self):
+        msg = {"protocol_version": "1.0", "sender": "agent", "content": {}}
         assert validate_mcp_envelope(msg) is False
-        assert "Missing key" in capsys.readouterr().out
 
-    def test_returns_false_when_sender_empty_string(self, capsys):
+    def test_returns_false_when_sender_empty_string(self):
         msg = {"protocol_version": "1.0", "sender": "", "content": {}, "metadata": {}}
         assert validate_mcp_envelope(msg) is False
-        assert "Empty sender field" in capsys.readouterr().out
+
+    def test_returns_false_when_sender_has_invalid_format(self):
+        msg = {"protocol_version": "1.0", "sender": "Invalid Agent!", "content": {}, "metadata": {}}
+        assert validate_mcp_envelope(msg) is False
+
+    def test_returns_true_for_valid_sender_format(self):
+        msg = {"protocol_version": "1.0", "sender": "research-agent-1", "content": {}, "metadata": {}}
+        assert validate_mcp_envelope(msg) is True
 
 
 # --- Pydantic Content Models ---

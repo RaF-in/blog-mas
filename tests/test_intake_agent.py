@@ -57,8 +57,28 @@ class TestIntakeAgentFailure:
     async def test_raises_on_llm_failure(self):
         llm = make_failing_llm(ConnectionError("timeout"))
 
-        with pytest.raises(ConnectionError, match="timeout"):
+        with pytest.raises(RuntimeError, match="Intake failed"):
             await intake_node(
                 {"raw_input": "Write about AI"},
                 config=make_config(llm),
+            )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_missing_raw_input(self):
+        llm = make_mock_llm(
+            BlogSpec(topic="AI", audience="general readers", tone="neutral", goal="educate", constraints=[])
+        )
+
+        with pytest.raises(ValueError, match="No raw_input"):
+            await intake_node(
+                {"raw_input": ""},
+                config=make_config(llm),
+            )
+
+    @pytest.mark.asyncio
+    async def test_raises_on_no_llm(self):
+        with pytest.raises(ValueError, match="No LLM configured"):
+            await intake_node(
+                {"raw_input": "Write about AI"},
+                config={"configurable": {}},
             )

@@ -1,6 +1,6 @@
 """Tests for the CLI application (interactive loop + integration)."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -121,3 +121,80 @@ class TestLoopBehavior:
         from blog_mas.cli import should_exit
 
         assert should_exit("Write about AI") is False
+
+
+class TestAsyncMain:
+    @pytest.mark.asyncio
+    async def test_normal_flow_displays_result(self, capsys):
+        from blog_mas.cli import async_main
+
+        mock_llm = make_mock_llm(BlogDraft(title="Test", body="Body", word_count=1))
+
+        with patch("blog_mas.cli.create_llm", return_value=mock_llm):
+            with patch("blog_mas.cli.run_pipeline_async", new_callable=AsyncMock) as mock_pipeline:
+                mock_pipeline.return_value = {
+                    "success": True,
+                    "draft": BlogDraft(title="Test Post", body="Content", word_count=1),
+                }
+
+                with patch("builtins.input", side_effect=["Mediterranean diet", "exit"]):
+                    await async_main()
+
+        output = capsys.readouterr().out
+        assert "Test Post" in output
+
+    @pytest.mark.asyncio
+    async def test_eof_exits_cleanly(self, capsys):
+        from blog_mas.cli import async_main
+
+        with patch("builtins.input", side_effect=EOFError):
+            await async_main()
+
+        output = capsys.readouterr().out
+        assert "Goodbye!" in output
+
+    @pytest.mark.asyncio
+    async def test_keyboard_interrupt_exits_cleanly(self, capsys):
+        from blog_mas.cli import async_main
+
+        with patch("builtins.input", side_effect=KeyboardInterrupt):
+            await async_main()
+
+        output = capsys.readouterr().out
+        assert "Goodbye!" in output
+
+    @pytest.mark.asyncio
+    async def test_quit_command_ends_loop(self, capsys):
+        from blog_mas.cli import async_main
+
+        mock_llm = make_mock_llm(BlogDraft(title="T", body="B", word_count=1))
+
+        with patch("blog_mas.cli.create_llm", return_value=mock_llm):
+            with patch("builtins.input", return_value="quit"):
+                await async_main()
+
+        output = capsys.readouterr().out
+        assert "Goodbye!" in output
+
+    @pytest.mark.asyncio
+    async def test_exit_command_ends_loop(self, capsys):
+        from blog_mas.cli import async_main
+
+        mock_llm = make_mock_llm(BlogDraft(title="T", body="B", word_count=1))
+
+        with patch("blog_mas.cli.create_llm", return_value=mock_llm):
+            with patch("builtins.input", return_value="exit"):
+                await async_main()
+
+        output = capsys.readouterr().out
+        assert "Goodbye!" in output
+
+
+class TestMain:
+    def test_main_calls_asyncio_run(self):
+        from blog_mas.cli import main
+
+        with patch("blog_mas.cli.setup_logging"):
+            with patch("blog_mas.cli.asyncio.run") as mock_run:
+                main()
+                mock_run.assert_called_once()

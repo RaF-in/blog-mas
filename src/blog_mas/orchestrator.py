@@ -1,4 +1,4 @@
-"""Orchestrator: LangGraph StateGraph with revision loop."""
+"""Orchestrator: LangGraph StateGraph with parallel librarian/research + revision loop."""
 
 import asyncio
 import logging
@@ -7,9 +7,11 @@ from langgraph.graph import END, StateGraph
 from pydantic import ValidationError
 
 from blog_mas.agents.intake import intake_node
+from blog_mas.agents.librarian import librarian_node
 from blog_mas.agents.researcher import research_node
 from blog_mas.agents.validator import validate_node
 from blog_mas.agents.writer import write_node
+from blog_mas.rag.blueprints import NEUTRAL_BLUEPRINT
 from blog_mas.state import BlogState
 
 logger = logging.getLogger(__name__)
@@ -33,17 +35,29 @@ def should_continue(state: BlogState) -> str:
 
 
 def build_graph() -> StateGraph:
-    """Build and compile the LangGraph blog generation pipeline."""
+    """Build and compile the LangGraph blog generation pipeline.
+
+    Topology: intake → [librarian ∥ research] → write → validate → END/retry
+    """
     graph = StateGraph(BlogState)
 
     graph.add_node("intake", intake_node)
+    graph.add_node("librarian", librarian_node)
     graph.add_node("research", research_node)
     graph.add_node("write", write_node)
     graph.add_node("validate", validate_node)
 
     graph.set_entry_point("intake")
+
+    # Fan-out: intake → both librarian and research in parallel
+    graph.add_edge("intake", "librarian")
     graph.add_edge("intake", "research")
+
+    # Fan-in: both feed into write
+    graph.add_edge("librarian", "write")
     graph.add_edge("research", "write")
+
+    # Revision loop unchanged
     graph.add_edge("write", "validate")
     graph.add_conditional_edges(
         "validate",
@@ -58,6 +72,9 @@ def run_pipeline(
     blog_spec=None,
     raw_input: str | None = None,
     llm=None,
+    store=None,
+    embedder=None,
+    reranker=None,
     max_retries: int = 3,
     base_delay: float = 2,
 ):
@@ -67,6 +84,9 @@ def run_pipeline(
             blog_spec=blog_spec,
             raw_input=raw_input,
             llm=llm,
+            store=store,
+            embedder=embedder,
+            reranker=reranker,
         )
     )
 
@@ -75,6 +95,9 @@ async def run_pipeline_async(
     blog_spec=None,
     raw_input: str | None = None,
     llm=None,
+    store=None,
+    embedder=None,
+    reranker=None,
 ) -> dict:
     """Run the full pipeline via LangGraph and return a result dict."""
     if raw_input is not None and not raw_input.strip():
@@ -93,9 +116,22 @@ async def run_pipeline_async(
         "verdict": None,
         "revision_feedback": None,
         "revision_count": 0,
+        "intent_query": None,
+        "topic_query": None,
+        "blueprint": NEUTRAL_BLUEPRINT,
+        "blueprint_match_score": None,
+        "blueprint_alternatives": None,
+        "blueprint_fallback_reason": None,
     }
 
-    config = {"configurable": {"llm": llm}}
+    config = {
+        "configurable": {
+            "llm": llm,
+            "store": store,
+            "embedder": embedder,
+            "reranker": reranker,
+        },
+    }
 
     try:
         final_state = await graph.ainvoke(initial_state, config=config)

@@ -1,0 +1,8 @@
+{
+  "id": "casual-explainer",
+  "description": "A friendly, accessible explanation of a topic for a general audience.",
+  "scene_goal": "Make complex topics easy to understand.",
+  "style_guide": "Conversational, uses analogies, short paragraphs, no technical jargon.",
+  "participants": [],
+  "instruction": "Write a friendly explanation using everyday analogies and simple language that anyone can follow."
+}

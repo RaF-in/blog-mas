@@ -61,3 +61,15 @@ class ValidationInput(BaseModel):
 class ValidationVerdict(BaseModel):
     verdict: Literal["pass", "fail"] = Field(max_length=50)
     reason: str
+
+
+class GoalDecomposition(BaseModel):
+    intent_query: str
+    topic_query: str
+
+    @field_validator("intent_query", "topic_query")
+    @classmethod
+    def _non_empty(cls, v: str) -> str:
+        if not v.strip():
+            raise ValueError("must be non-empty")
+        return v.strip()

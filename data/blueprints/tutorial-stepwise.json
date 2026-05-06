@@ -1,0 +1,8 @@
+{
+  "id": "tutorial-stepwise",
+  "description": "A step-by-step tutorial guiding the reader through a process or concept.",
+  "scene_goal": "Enable the reader to complete a task by following clear steps.",
+  "style_guide": "Numbered steps, clear headings, includes tips and warnings.",
+  "participants": [],
+  "instruction": "Write a step-by-step tutorial with numbered instructions, tips, and clear section headings."
+}

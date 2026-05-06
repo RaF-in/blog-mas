@@ -1,0 +1,10 @@
+- query: "health benefits of Mediterranean diet"
+  expected_doc_ids: ["mediterranean-diet"]
+- query: "AI machine learning applications"
+  expected_doc_ids: ["artificial-intelligence"]
+- query: "global warming and greenhouse gases"
+  expected_doc_ids: ["climate-change"]
+- query: "Mars rover and space missions"
+  expected_doc_ids: ["space-exploration"]
+- query: "depression and anxiety treatment"
+  expected_doc_ids: ["mental-health"]

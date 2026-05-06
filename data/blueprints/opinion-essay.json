@@ -1,0 +1,8 @@
+{
+  "id": "opinion-essay",
+  "description": "A persuasive opinion piece presenting a clear viewpoint with supporting arguments.",
+  "scene_goal": "Persuade the reader by presenting a well-reasoned stance.",
+  "style_guide": "First person, strong thesis, evidence-backed arguments, engaging introduction.",
+  "participants": [],
+  "instruction": "Write a persuasive opinion essay with a clear thesis, supporting arguments, and a compelling conclusion."
+}

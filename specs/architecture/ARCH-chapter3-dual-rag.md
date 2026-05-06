@@ -418,7 +418,7 @@ Tasks are generated and reviewed **one group at a time**, in dependency order. T
 
 # Tasks
 
-_Filled group by group via the generate-tasks skill. Currently populated: G1. Pending: G2–G11._
+_Filled group by group via the generate-tasks skill. Currently populated: G1–G2 (T1–T8). Pending: G3–G11 (T9–T24)._
 
 ## Task T1: Blueprint Pydantic Schema + Injection Scan + Neutral Default
 
@@ -1099,3 +1099,1016 @@ T6 follows T5 (consumes `Section`, produces parent `Chunk`s).
 T7 and T8 may run in parallel after T6 (both consume `Chunk`s; T7 produces children, T8 mutates `contextualized_text` — no conflict).
 
 If implemented serially: **T5 → T6 → T7 → T8**.
+
+---
+
+## Task T9: Hybrid Retrieval — RRF + Reranker + Small-to-Big
+
+> **Status:** done
+> **Effort:** m
+> **Priority:** high
+> **Depends on:** T2 (EmbeddingClient), T3 (QdrantStore), T4 (FakeEmbedder, FakeReranker, FakeVectorStore)
+> **Satisfies REQs:** R-Hybrid-Retrieval; R-Graceful; F13; F14; F15
+> **Footprint slice:** New: `src/blog_mas/rag/retrieval.py`, `tests/rag/test_retrieval.py`
+> **High-risk areas touched:** Hybrid retrieval correctness (H)
+
+### Description
+
+Implement `hybrid_search()`: the single function that all runtime callers (Librarian, Researcher) use to retrieve chunks. It chains dense search → sparse search → Reciprocal Rank Fusion → cross-encoder reranking → small-to-big parent expansion. Every error path degrades gracefully rather than crashing.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/rag/test_retrieval.py`
+
+#### Test Scenarios
+
+##### `Reciprocal Rank Fusion`
+
+- **fuses dense + sparse ranked lists** — GIVEN dense returns `[A, B, C]` and sparse returns `[B, C, D]` with scores, WHEN `_rrf_fuse` runs with k=60, THEN the unified ranking is ordered by combined RRF score
+- **respects `RAG_RRF_K` env override** — GIVEN env sets k=100, THEN fusion uses that value
+
+##### `Reranker integration`
+
+- **returns top-K after rerank** — GIVEN 20 fused candidates and `top_k=3`, WHEN reranker runs, THEN exactly 3 results returned
+- **reranker error degrades to RRF top-K** — GIVEN FakeReranker raises, THEN returns RRF top-K unmodified, logs degraded mode _(verifies F13)_
+
+##### `Small-to-big parent expansion`
+
+- **proposition chunk expands to parent** — GIVEN a winning chunk has `chunk_type="proposition"`, WHEN expansion runs, THEN the parent's `raw_text` is substituted in the result
+- **deduplicates parent if also in result set** — GIVEN both a proposition and its parent appear, THEN the parent appears only once
+
+##### `Graceful degradation`
+
+- **dense-only on sparse failure** — GIVEN sparse_search returns [], THEN proceeds with dense results only, logs degraded _(verifies F14)_
+- **sparse-only on dense failure** — GIVEN dense_search returns [], THEN proceeds with sparse results only
+- **both fail → returns []** — GIVEN both return [], THEN `hybrid_search` returns `[]` _(verifies F15)_
+- **empty retrieval returns []** — no points in collection → `[]`
+
+##### `End-to-end`
+
+- **full pipeline returns scored chunks** — GIVEN FakeVectorStore seeded with chunks, FakeEmbedder, FakeReranker, WHEN `hybrid_search(query, namespace="knowledge", top_k=3)` runs, THEN returns up to 3 `ScoredPoint`-like results with payloads
+- **respects namespace isolation** — queries `knowledge` collection only; blueprints query `blueprints` collection
+
+### Implementation Notes
+
+- **Module:** `rag/retrieval.py` (new)
+- **Pattern reference:** No existing pattern. `QdrantStore` provides `dense_search` and `sparse_search`; `EmbeddingClient` provides `embed_batch`. This module orchestrates them.
+- **Key decisions:**
+  - Decision 4 (hybrid retrieval day one).
+  - Decision 11 (RRF for fusion, k=60 default).
+  - Decision 18 (BAAI/bge-reranker-base via HF Inference).
+  - Decision 12 (top_k=3 knowledge, top_k=5 blueprints, threshold 0.7).
+- **Libraries:** `huggingface_hub.InferenceClient` for reranker; everything else via T2/T3.
+- **Config from env:** `RAG_DENSE_TOP_N=20`, `RAG_SPARSE_TOP_N=20`, `RAG_FUSION_TOP_N=20`, `RAG_RERANK_TOP_K=3`, `RAG_BLUEPRINT_TOP_K=5`, `RAG_RRF_K=60`, `RAG_LIBRARIAN_SCORE_THRESHOLD=0.7`.
+- **High-risk callouts:** Hybrid retrieval correctness (H) — RRF + reranker + small-to-big together drive end-to-end quality. Bugs are silent. Test plan covers each stage in isolation plus end-to-end.
+
+### Scope Boundaries
+
+- Do NOT implement agent logic (Librarian/Researcher) — those are G6.
+- Do NOT implement ingestion — that's G4.
+- Do NOT introduce structlog — stdlib `logging` only.
+- Only implement: `hybrid_search(query, namespace, top_k, store, embedder, reranker)`, internal `_rrf_fuse`, internal `_expand_parents`, reranker client helper.
+
+### Files Expected
+
+**New files:**
+- `src/blog_mas/rag/retrieval.py`
+- `tests/rag/test_retrieval.py`
+
+**Modified files:** _(none)_
+
+**Must NOT modify:**
+- `src/blog_mas/rag/vector_store.py`, `src/blog_mas/rag/embedding.py` — owned by G1
+- `src/blog_mas/agents/**` — G6
+
+---
+
+## Task T10: Knowledge Ingestion Graph
+
+> **Status:** done
+> **Effort:** m
+> **Priority:** high
+> **Depends on:** T5–T8 (chunking pipeline), T2 (EmbeddingClient), T3 (QdrantStore)
+> **Satisfies REQs:** R-Two-Graphs; R-Hybrid-Chunking (orchestration); R-Idempotent; R-NF-Cost
+> **Footprint slice:** New: `src/blog_mas/rag/ingestion_graph.py`, `tests/rag/test_ingestion_graph.py`
+> **High-risk areas touched:** Vector store / Qdrant integration (H — ingestion side)
+
+### Description
+
+Implement the knowledge ingestion LangGraph: loads `.md` files from a directory, fans out per document through the 4-stage chunking pipeline (structural → recursive → propositions → contextualization), embeds all chunks via `EmbeddingClient`, and upserts to Qdrant with content-hash IDs. Re-running on unchanged sources is a no-op.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/rag/test_ingestion_graph.py`
+
+#### Test Scenarios
+
+##### `End-to-end with fakes`
+
+- **ingests a markdown doc into FakeVectorStore** — GIVEN a temp dir with one `.md` file, WHEN ingestion graph runs with FakeVectorStore/FakeEmbedder/mock LLMs, THEN points are upserted with correct payloads (`raw_text`, `contextualized_text`, `parent_id`, `doc_id`, `headings_path`, `chunk_type`, `content_hash`)
+- **parent and proposition chunks both present** — output includes both `chunk_type="parent"` and `chunk_type="proposition"` points
+
+##### `Idempotency`
+
+- **second run on same data produces no new points** — GIVEN first run created N points, WHEN run again on same files, THEN point count is still N _(verifies R-Idempotent)_
+
+##### `Graceful degradation`
+
+- **proposition extraction failure: parent still indexed** — GIVEN mock LLM returns bad JSON for one chunk's propositions, WHEN graph runs, THEN that parent is still upserted, only its propositions are missing _(verifies F17)_
+
+##### `Multi-file`
+
+- **processes all .md files in directory** — GIVEN 3 files, THEN each produces its own set of points with distinct `doc_id`
+
+### Implementation Notes
+
+- **Module:** `rag/ingestion_graph.py` (new)
+- **Pattern reference:** `orchestrator.py` for LangGraph `StateGraph` style. This is a separate graph (not part of the runtime graph).
+- **Key decisions:**
+  - Decision 12 (LangGraph for ingestion with checkpointer).
+  - Decision 15 (resume-from-failure via checkpointer — wire but don't deeply test for v1).
+  - Decision 9 (propositions on ALL parents).
+- **Graph topology (simplified for v1):**
+  ```
+  load_docs → chunk_all → embed_all → upsert_all
+  ```
+  Not a full fan-out/fan-in for v1 — keep it sequential per document to stay simple. The checkpointer still works.
+- **Libraries:** `langgraph`, chunking modules from T5–T8.
+- **High-risk callouts:** Vector store integration (H) — ingestion is where content-hash IDs are first generated and upserted. Must match T3's expected format exactly.
+
+### Scope Boundaries
+
+- Do NOT implement the `--rebuild` flag or CLI wiring — that's G9.
+- Do NOT implement blueprint ingestion — that's T11.
+- Do NOT implement LangSmith tracing — that's G11.
+- Do NOT add structlog — stdlib `logging` only.
+- Only implement: `build_ingestion_graph(store, embedder, llm)` function, state schema for ingestion, node functions for each stage.
+
+### Files Expected
+
+**New files:**
+- `src/blog_mas/rag/ingestion_graph.py`
+- `tests/rag/test_ingestion_graph.py`
+
+**Modified files:** _(none)_
+
+**Must NOT modify:**
+- `src/blog_mas/rag/chunking/**` — owned by G2
+- `src/blog_mas/orchestrator.py` — G7
+
+---
+
+## Task T11: Blueprint Ingestion Graph
+
+> **Status:** done
+> **Effort:** s
+> **Priority:** high
+> **Depends on:** T1 (Blueprint schema), T2 (EmbeddingClient), T3 (QdrantStore)
+> **Satisfies REQs:** R-Two-Graphs; R-Corpus (blueprints); description-only embedding invariant
+> **Footprint slice:** New: `src/blog_mas/rag/blueprint_graph.py`, `tests/rag/test_blueprint_graph.py`
+
+### Description
+
+Implement the blueprint ingestion LangGraph: loads `.json` blueprint files, validates each against the `Blueprint` Pydantic schema, embeds only the `description` field (not the full JSON), and upserts to Qdrant with the full `blueprint_json` in the payload. Simpler than the knowledge graph — no chunking pipeline.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/rag/test_blueprint_graph.py`
+
+#### Test Scenarios
+
+##### `End-to-end with fakes`
+
+- **validates and upserts blueprints** — GIVEN a temp dir with valid `.json` blueprint files, WHEN graph runs, THEN each is upserted with `description`-only embedding and full `blueprint_json` in payload _(verifies description-only embedding invariant)_
+- **blueprint_json payload is the original JSON string** — for retrieval-time re-validation
+
+##### `Validation handling`
+
+- **skips invalid blueprint with warning** — GIVEN one file fails `validate_blueprint_payload`, WHEN graph runs, THEN that file is skipped and others are still ingested
+
+##### `Idempotency`
+
+- **re-run on same files is no-op** — point count unchanged after second run
+
+### Implementation Notes
+
+- **Module:** `rag/blueprint_graph.py` (new)
+- **Pattern reference:** `orchestrator.py` for LangGraph style; simpler graph than T10.
+- **Key decisions:**
+  - Decision 14 (6 seeded blueprints).
+  - Description-only embedding (PLAN invariant).
+  - Decision 20 (separate graph from knowledge ingestion).
+- **Graph topology:**
+  ```
+  load_blueprints → validate_all → embed_descriptions → upsert_all
+  ```
+- **Libraries:** `langgraph`, T1's `validate_blueprint_payload`, T2's `EmbeddingClient`.
+
+### Scope Boundaries
+
+- Do NOT implement `--rebuild` or CLI wiring — G9.
+- Do NOT implement knowledge ingestion — T10.
+- Only implement: `build_blueprint_graph(store, embedder)` function, state schema, node functions.
+
+### Files Expected
+
+**New files:**
+- `src/blog_mas/rag/blueprint_graph.py`
+- `tests/rag/test_blueprint_graph.py`
+
+**Modified files:** _(none)_
+
+**Must NOT modify:**
+- `src/blog_mas/rag/blueprints.py` — owned by T1
+- `src/blog_mas/rag/ingestion_graph.py` — owned by T10
+
+---
+
+## Task T12: Extend BlogState + Add GoalDecomposition Model
+
+> **Status:** done
+> **Effort:** xs
+> **Priority:** high
+> **Depends on:** T1 (Blueprint model referenced by state)
+> **Satisfies REQs:** R-Goal-Decomp; R-Librarian (state fields); R-Dual-RAG (state contract)
+> **Footprint slice:** Modified: `src/blog_mas/state.py`, `src/blog_mas/mcp/models.py`
+
+### Description
+
+Add new fields to `BlogState` for Chapter 3's dual-RAG flow and add the `GoalDecomposition` Pydantic model to `mcp/models.py`. This is a small, purely additive task — no existing fields or reducers change.
+
+### Test Plan
+
+#### Test File(s)
+- Tested implicitly by T13 (intake), T14 (librarian), T17 (orchestrator). No dedicated test file — this task is a data contract, not behavior.
+
+#### Test Scenarios
+
+_(Verified by downstream tasks.)_
+
+- **BlogState accepts new fields with None defaults** — constructing a state dict with only existing fields still works
+- **GoalDecomposition model validates non-empty queries** — empty string after `.strip()` is rejected
+
+### Implementation Notes
+
+- **State fields to add to `BlogState`:**
+  ```
+  intent_query: str | None
+  topic_query: str | None
+  blueprint: Blueprint | None
+  blueprint_match_score: float | None
+  blueprint_alternatives: list[str] | None
+  blueprint_fallback_reason: str | None
+  ```
+- **New model in `mcp/models.py`:**
+  ```
+  class GoalDecomposition(BaseModel):
+      intent_query: str  (non-empty after strip, field_validator)
+      topic_query: str   (non-empty after strip, field_validator)
+  ```
+- **Import:** `BlogState` needs to import `Blueprint` from `rag.blueprints`.
+- **Reducer:** `revision_count`'s `Annotated[int, operator.add]` must remain unchanged.
+
+### Scope Boundaries
+
+- Do NOT modify any agent code — G5/G6 handles that.
+- Do NOT change existing `BlogState` fields or reducers.
+- Only implement: 6 new `BlogState` fields, 1 new `GoalDecomposition` model.
+
+### Files Expected
+
+**Modified files:**
+- `src/blog_mas/state.py` — add 6 fields
+- `src/blog_mas/mcp/models.py` — add `GoalDecomposition`
+
+**Must NOT modify:**
+- `src/blog_mas/agents/**` — G5/G6
+- `src/blog_mas/orchestrator.py` — G7
+
+---
+
+## Task T13: Goal Decomposition in Intake
+
+> **Status:** done
+> **Effort:** s
+> **Priority:** high
+> **Depends on:** T12 (GoalDecomposition model, extended BlogState)
+> **Satisfies REQs:** R-Goal-Decomp; F10 (deterministic fallback)
+> **Footprint slice:** Modified: `src/blog_mas/agents/intake.py`, `tests/test_intake_agent.py`
+
+### Description
+
+Extend the `intake_node` to produce `intent_query` and `topic_query` after creating the `BlogSpec`. After the existing `run_agent_chain` call for `BlogSpec`, make a second call for `GoalDecomposition`. On failure, retry once with a stricter prompt; on second failure, derive deterministically from BlogSpec fields.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/test_intake_agent.py` (extend existing)
+
+#### Test Scenarios
+
+##### `Goal decomposition happy path`
+
+- **emits intent_query and topic_query on state** — GIVEN a valid raw_input and mock LLM returning `GoalDecomposition(intent_query="technical deep dive", topic_query="Mediterranean diet")`, WHEN intake runs, THEN result dict contains both fields populated
+
+##### `Deterministic fallback (F10)`
+
+- **LLM fails twice → deterministic derivation** — GIVEN a sequence LLM that succeeds for BlogSpec then fails for GoalDecomposition twice, WHEN intake runs, THEN `intent_query = f"{tone} {goal} for {audience}"` and `topic_query = topic`
+- **deterministic fallback produces non-empty strings** — verify the derived strings are non-empty
+
+##### `Regression`
+
+- **existing BlogSpec behavior preserved** — GIVEN the existing test case (no goal decomposition assertions), WHEN it runs, THEN `blog_spec` is still returned correctly
+
+### Implementation Notes
+
+- **Module:** `agents/intake.py` (modify)
+- **Pattern reference:** `agent_helpers.run_agent_chain` — same pattern as the existing BlogSpec call. Use `model_cls=GoalDecomposition`.
+- **Key decisions:**
+  - Decision 6 (goal decomposition inside intake, not a separate node).
+  - Fallback: `intent_query = f"{spec.tone} {spec.goal} for {spec.audience}"`, `topic_query = spec.topic`.
+- **Retry strategy:** on first `GoalDecomposition` failure, retry once with the same call. On second failure, use deterministic fallback. Wrap in try/except — do not let this crash the intake.
+- **Return dict:** `{"blog_spec": spec, "intent_query": ..., "topic_query": ...}`.
+
+### Scope Boundaries
+
+- Do NOT modify `prompts.py` — the GoalDecomposition prompt can be a module constant in `intake.py`.
+- Do NOT modify `state.py` — that's T12.
+- Only implement: second `run_agent_chain` call in `intake_node`, retry + fallback logic, `GOAL_DECOMP_SYSTEM_PROMPT` constant.
+
+### Files Expected
+
+**Modified files:**
+- `src/blog_mas/agents/intake.py` — add goal decomposition step
+- `tests/test_intake_agent.py` — add goal decomposition test cases
+
+**Must NOT modify:**
+- `src/blog_mas/state.py` — T12 owns the schema
+- `src/blog_mas/prompts.py` — runtime prompts only
+- `src/blog_mas/orchestrator.py` — G7
+
+---
+
+## Task T14: Librarian Agent (NEW)
+
+> **Status:** done
+> **Effort:** s
+> **Priority:** high
+> **Depends on:** T9 (hybrid_search), T12 (BlogState blueprint fields)
+> **Satisfies REQs:** R-Librarian; R-Graceful; R-NF-Security; F6; F7; F8; F9
+> **Footprint slice:** New: `src/blog_mas/agents/librarian.py`, `tests/test_librarian_agent.py`
+> **High-risk areas touched:** Blueprint security boundary (H)
+
+### Description
+
+Implement the Context Librarian agent: a new LangGraph node that reads `intent_query` from state, performs hybrid search over the `blueprints` namespace, validates the top result against the `Blueprint` Pydantic schema, and writes the validated blueprint (or neutral fallback) to state. Every failure path resolves to the neutral default.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/test_librarian_agent.py`
+
+#### Test Scenarios
+
+##### `Happy path`
+
+- **valid blueprint above threshold → writes to state** — GIVEN FakeVectorStore seeded with a valid blueprint (score > 0.7), WHEN librarian runs, THEN `blueprint` is set, `blueprint_match_score` > 0.7, `blueprint_fallback_reason` is None
+
+##### `Fallback paths`
+
+- **low score → neutral default** — GIVEN top match score < 0.7, WHEN librarian runs, THEN `blueprint` is NEUTRAL_BLUEPRINT, `blueprint_fallback_reason == "low_score"` _(verifies F6)_
+- **missing blueprint_json in payload → neutral** — GIVEN payload lacks `blueprint_json`, THEN neutral default with `fallback_reason="missing_payload"` _(verifies F7)_
+- **Pydantic validation failure → neutral** — GIVEN malformed JSON in `blueprint_json`, THEN neutral default with `fallback_reason="schema_violation"` _(verifies F8)_
+- **injection marker → neutral + security log** — GIVEN `blueprint_json` contains `{{` in instruction, THEN neutral default, logged as security event _(verifies F9)_
+- **empty retrieval → neutral** — GIVEN no points in blueprints namespace, THEN neutral default
+
+### Implementation Notes
+
+- **Module:** `agents/librarian.py` (new)
+- **Pattern reference:** `agents/intake.py` for node signature `async def librarian_node(state: BlogState, config: RunnableConfig) -> dict`. Read LLM via `config["configurable"]["llm"]` — but Librarian doesn't call an LLM directly; it calls `hybrid_search` and `validate_blueprint_payload`.
+- **Key decisions:**
+  - Decision 7 (validation at retrieval time).
+  - Decision 10 (parallel with Researcher via asyncio.gather — wiring in G7).
+  - Decision 12 (top_k=5 for blueprints, threshold=0.7).
+- **Flow:** read `intent_query` → `hybrid_search(query=intent_query, namespace="blueprints", top_k=5)` → check score → parse `blueprint_json` → `validate_blueprint_payload` → write to state or neutral fallback.
+- **High-risk callouts:** Blueprint security boundary (H) — MUST call `validate_blueprint_payload` on every retrieved blueprint. Never inject raw payload into state.
+
+### Scope Boundaries
+
+- Do NOT implement hybrid search — that's T9. Call it as a dependency.
+- Do NOT implement orchestrator wiring — that's G7.
+- Do NOT implement FakeVectorStore seeding in this file — use existing fixtures.
+- Only implement: `librarian_node`, reading `hybrid_search` and `validate_blueprint_payload` as imports.
+
+### Files Expected
+
+**New files:**
+- `src/blog_mas/agents/librarian.py`
+- `tests/test_librarian_agent.py`
+
+**Modified files:** _(none)_
+
+**Must NOT modify:**
+- `src/blog_mas/orchestrator.py` — G7
+- `src/blog_mas/rag/retrieval.py` — T9
+- `src/blog_mas/rag/blueprints.py` — T1
+
+---
+
+## Task T15: Researcher Rewrite (Dict → Hybrid Retrieval)
+
+> **Status:** done
+> **Effort:** m
+> **Priority:** high
+> **Depends on:** T9 (hybrid_search), T12 (BlogState topic_query field)
+> **Satisfies REQs:** R-Researcher-Upgrade; R-Graceful; F5; F17
+> **Footprint slice:** Modified: `src/blog_mas/agents/researcher.py`, `src/blog_mas/prompts.py`, `tests/test_researcher_agent.py`
+> **High-risk areas touched:** Researcher rewrite (H)
+
+### Description
+
+Replace the `lookup_topic()` dict-based knowledge retrieval with `hybrid_search()` over the `knowledge` namespace. Build the user prompt with `[Source <id>]` citation blocks. The `ResearchSummary.source` field becomes a comma-joined list of cited chunk IDs. Anti-hallucination instructions are added to the system prompt.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/test_researcher_agent.py` (rewrite existing)
+
+#### Test Scenarios
+
+##### `Hybrid retrieval integration`
+
+- **retrieves chunks and synthesizes with citations** — GIVEN FakeVectorStore seeded with chunks, WHEN researcher runs with `topic_query`, THEN the user message sent to LLM contains `[Source <chunk_id>]` blocks, and `research_summary.source` contains cited chunk IDs
+- **reads topic_query from state, falls back to blog_spec.topic** — GIVEN `topic_query` is set, uses it; GIVEN only `blog_spec.topic`, uses that
+
+##### `Graceful handling`
+
+- **empty retrieval → bullet_points=[], source="none"** — GIVEN FakeVectorStore returns no results, WHEN researcher runs, THEN returns empty bullets with source="none" _(verifies F5)_
+- **no blog_spec → ValueError** — preserved from existing behavior
+
+##### `Prompt construction`
+
+- **user message includes audience and goal** — verify prompt contains `Audience:` and `Goal:` lines
+- **system prompt includes anti-hallucination + citation rules** — verify extended `RESEARCHER_SYSTEM_PROMPT` contains citation instruction
+
+### Implementation Notes
+
+- **Module:** `agents/researcher.py` (rewrite), `prompts.py` (extend RESEARCHER_SYSTEM_PROMPT)
+- **Pattern reference:** Keep the existing `research_node` signature. The key change is replacing `lookup_topic()` with `hybrid_search()`.
+- **Key decisions:**
+  - Decision 4 (hybrid retrieval).
+  - Decision 12 (top_k=3 for knowledge).
+  - `source` field format: comma-joined chunk IDs (e.g. `"abc123,def456"`).
+- **How to get `hybrid_search` into the node:** inject via `config["configurable"]` (e.g. `"retrieval_fn"`), OR import and call directly with a `QdrantStore` / `FakeVectorStore` passed in. For testability, prefer config injection — the orchestrator (G7) wires the real store.
+- **High-risk callouts:** Researcher rewrite (H) — `ResearchSummary` shape must not change; Writer + Validator depend on it.
+
+### Scope Boundaries
+
+- Do NOT modify Writer or Validator — G6 handles Writer separately.
+- Do NOT modify orchestrator — G7.
+- Do NOT import from `knowledge_base.py` — that module is deleted in G10.
+- Only implement: replace `lookup_topic` with `hybrid_search`, build citation prompt, extend `RESEARCHER_SYSTEM_PROMPT`.
+
+### Files Expected
+
+**Modified files:**
+- `src/blog_mas/agents/researcher.py` — replace dict lookup with hybrid retrieval
+- `src/blog_mas/prompts.py` — extend `RESEARCHER_SYSTEM_PROMPT` with citation rules
+- `tests/test_researcher_agent.py` — rewrite tests to use FakeVectorStore
+
+**Must NOT modify:**
+- `src/blog_mas/agents/writer.py` — T16
+- `src/blog_mas/agents/validator.py` — unchanged
+- `src/blog_mas/orchestrator.py` — G7
+- `src/blog_mas/knowledge_base.py` — deletion is T23
+
+---
+
+## Task T16: Writer Rewrite (Blueprint Injection)
+
+> **Status:** done
+> **Effort:** s
+> **Priority:** high
+> **Depends on:** T12 (BlogState blueprint field)
+> **Satisfies REQs:** R-Writer-Upgrade; R-NF-Security (canonical re-serialization)
+> **Footprint slice:** Modified: `src/blog_mas/agents/writer.py`, `src/blog_mas/prompts.py`, `tests/test_writer_agent.py`
+
+### Description
+
+Upgrade the Writer to consume `blueprint` from state and inject the validated, canonically re-serialized blueprint JSON into its system prompt via a fixed scaffold. The revision path is unchanged.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/test_writer_agent.py` (extend)
+
+#### Test Scenarios
+
+##### `Blueprint injection`
+
+- **injects canonical blueprint JSON into system prompt** — GIVEN a `Blueprint` in state, WHEN writer runs, THEN the system prompt contains `--- SEMANTIC BLUEPRINT (JSON) ---` followed by `Blueprint.model_dump_json()` output
+- **uses validated blueprint, not raw payload** — the injected JSON is the canonical re-serialization of the Pydantic model
+
+##### `Revision path`
+
+- **revision still works with blueprint** — GIVEN `revision_feedback` is set and blueprint is in state, WHEN writer runs, THEN uses `WRITER_REVISION_SYSTEM_PROMPT` with feedback + blueprint scaffold is still present
+
+##### `Error handling`
+
+- **no blueprint in state → ValueError** — GIVEN blueprint is None, WHEN writer runs, THEN raises ValueError
+- **no research_summary → ValueError** — preserved from existing behavior
+
+### Implementation Notes
+
+- **Module:** `agents/writer.py` (modify), `prompts.py` (add `WRITER_BLUEPRINT_SCAFFOLD`)
+- **Pattern reference:** Keep the existing `write_node` signature and structure. Add blueprint reading and prompt assembly before the LLM call.
+- **Key decisions:**
+  - Canonical re-serialization: `Blueprint.model_dump_json()` of the validated model, never the raw string from Qdrant.
+  - Scaffold format:
+    ```
+    --- SEMANTIC BLUEPRINT (JSON) ---
+    {canonical_json}
+    --- END SEMANTIC BLUEPRINT ---
+    ```
+  - Revision path: prepend blueprint scaffold to the revision system prompt as well.
+- **High-risk callouts:** The blueprint must come from the already-validated `Blueprint` Pydantic object in state (set by Librarian), never re-read from Qdrant.
+
+### Scope Boundaries
+
+- Do NOT modify Validator — unchanged.
+- Do NOT modify the revision loop — that's orchestrator (G7).
+- Only implement: read `blueprint` from state, build scaffold prompt, integrate into both initial and revision paths.
+
+### Files Expected
+
+**Modified files:**
+- `src/blog_mas/agents/writer.py` — read blueprint, inject scaffold
+- `src/blog_mas/prompts.py` — add `WRITER_BLUEPRINT_SCAFFOLD`
+- `tests/test_writer_agent.py` — add blueprint injection tests
+
+**Must NOT modify:**
+- `src/blog_mas/agents/validator.py` — unchanged
+- `src/blog_mas/rag/blueprints.py` — T1
+
+---
+
+## Task T17: Orchestrator Parallel Wiring
+
+> **Status:** done
+> **Effort:** m
+> **Priority:** high
+> **Depends on:** T13 (intake with goal decomp), T14 (librarian), T15 (researcher rewrite), T16 (writer rewrite)
+> **Satisfies REQs:** R-Parallel; R-Validator-Preserved; F19
+> **Footprint slice:** Modified: `src/blog_mas/orchestrator.py`, `tests/test_orchestrator.py`
+> **High-risk areas touched:** Runtime parallel orchestration (M)
+
+### Description
+
+Restructure the orchestrator graph: add the `librarian` node, replace the linear `intake → research → write` path with a parallel branch where Librarian and Researcher run concurrently via `asyncio.gather(..., return_exceptions=True)`, both feeding into Writer. The existing validator + revision loop must survive unchanged.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/test_orchestrator.py` (extend)
+
+#### Test Scenarios
+
+##### `Graph structure`
+
+- **librarian node exists in compiled graph** — assert `"librarian"` is a node name
+- **parallel branch: intake → [librarian, research] → write** — verify graph edges show both paths from intake to write
+- **validator revision loop preserved** — GIVEN a fail verdict with `revision_count < MAX_REVISIONS`, WHEN `should_continue` runs, THEN returns `"retry"` _(regression guard for B1)_
+
+##### `Parallel execution`
+
+- **both librarian and research run before write** — GIVEN mock LLMs, WHEN graph runs, THEN write receives both `blueprint` and `research_summary` from state
+- **one branch fails: other proceeds** — GIVEN librarian raises, WHEN graph runs with `return_exceptions=True`, THEN `research_summary` is still populated; Writer proceeds with neutral blueprint _(verifies F19)_
+
+##### `Initial state`
+
+- **initial state includes new fields with None defaults** — `intent_query`, `topic_query`, `blueprint`, `blueprint_match_score`, `blueprint_alternatives`, `blueprint_fallback_reason` all default to None
+
+### Implementation Notes
+
+- **Module:** `orchestrator.py` (modify)
+- **Pattern reference:** The current graph is linear. The new topology:
+  ```
+  intake → [librarian ∥ research] → write → validate → END/retry
+  ```
+  LangGraph doesn't natively support `asyncio.gather` inside the graph — the parallelism is achieved by having both `librarian` and `research` as nodes that both receive state from `intake` and both feed into `write`. LangGraph's StateGraph will run them concurrently if they're independent fan-out branches.
+- **Implementation approach:**
+  1. Add `"librarian"` node with `librarian_node`.
+  2. Remove `intake → research` edge.
+  3. Add `intake → librarian` and `intake → research` edges.
+  4. Add `librarian → write` and `research → write` edges.
+  5. Keep `write → validate → END/retry` unchanged.
+- **Wire dependencies:** The `retrieval_fn`, `store`, and `embedder` need to be available in config for the librarian and researcher nodes. Add them to `run_pipeline_async`'s config dict.
+- **High-risk callouts:** Runtime parallel orchestration (M) — one branch failing must not crash the other. LangGraph handles this if both branches feed into a join node.
+
+### Scope Boundaries
+
+- Do NOT modify individual agent implementations — T13–T16 handle those.
+- Do NOT modify `should_continue` or `MAX_REVISIONS` — revision loop is preserved.
+- Only implement: graph topology changes, config wiring for retrieval dependencies.
+
+### Files Expected
+
+**Modified files:**
+- `src/blog_mas/orchestrator.py` — add librarian node, parallel edges, config wiring
+- `tests/test_orchestrator.py` — add parallel branch and regression tests
+
+**Must NOT modify:**
+- `src/blog_mas/agents/**` — T13–T16
+- `src/blog_mas/state.py` — T12
+- `src/blog_mas/agents/validator.py` — unchanged
+
+---
+
+## Task T18: Knowledge Data Migration
+
+> **Status:** done
+> **Effort:** xs
+> **Priority:** medium
+> **Depends on:** None
+> **Satisfies REQs:** R-Corpus (knowledge); Decision 13
+
+### Description
+
+Migrate the 5 existing knowledge topics from the Python dict in `knowledge_base.py` to individual Markdown files in `data/knowledge/`. Verbatim — no header synthesis, no editing.
+
+### Test Plan
+
+#### Test File(s)
+- No dedicated test file. Verified by T10 (ingestion graph) and T22 (recall@k) consuming the files.
+
+#### Test Scenarios
+
+_(Verified by downstream tasks that read these files.)_
+
+- **all 5 files exist in `data/knowledge/`** — `mediterranean-diet.md`, `artificial-intelligence.md`, `climate-change.md`, `space-exploration.md`, `mental-health.md`
+- **content matches the dict values verbatim** — manual spot-check against `knowledge_base.py`
+
+### Implementation Notes
+
+- **Source:** `src/blog_mas/knowledge_base.py` — read the `KNOWLEDGE_BASE` dict values.
+- **Target:** `data/knowledge/*.md` — one file per topic, content is the dict value verbatim.
+- **File naming:** slug-case of the topic key (e.g. `"Mediterranean Diet"` → `mediterranean-diet.md`).
+
+### Scope Boundaries
+
+- Do NOT modify `knowledge_base.py` — deletion is T23.
+- Do NOT add synthetic headers — Decision 13 (verbatim migration).
+- Only implement: create 5 `.md` files.
+
+### Files Expected
+
+**New files:**
+- `data/knowledge/mediterranean-diet.md`
+- `data/knowledge/artificial-intelligence.md`
+- `data/knowledge/climate-change.md`
+- `data/knowledge/space-exploration.md`
+- `data/knowledge/mental-health.md`
+
+---
+
+## Task T19: Blueprint Seeding
+
+> **Status:** done
+> **Effort:** xs
+> **Priority:** medium
+> **Depends on:** T1 (Blueprint schema for validation)
+> **Satisfies REQs:** R-Corpus (blueprints); Decision 14
+
+### Description
+
+Create 6 blueprint JSON files in `data/blueprints/` with dummy data: `technical-deep-dive`, `executive-summary`, `casual-explainer`, `tutorial-stepwise`, `news-brief`, `opinion-essay`. Each must validate against the `Blueprint` Pydantic schema.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/test_blueprint_files.py` (light)
+
+#### Test Scenarios
+
+##### `File validation`
+
+- **all 6 blueprint files exist and are valid JSON** — iterate `data/blueprints/*.json`, parse each
+- **each file validates against Blueprint schema** — `validate_blueprint_payload(content)` returns a non-None `Blueprint` for each
+
+### Implementation Notes
+
+- **Target:** `data/blueprints/*.json` — one file per blueprint type.
+- **Content:** dummy but realistic. Each file has all required Blueprint fields within bounds.
+- **Example structure:**
+  ```json
+  {
+    "id": "technical-deep-dive",
+    "description": "An in-depth technical analysis with code examples and detailed explanations.",
+    "scene_goal": "Provide comprehensive technical understanding.",
+    "style_guide": "Formal, precise, code-heavy, assumes technical audience.",
+    "participants": [],
+    "instruction": "Write a detailed technical analysis with code examples, diagrams, and step-by-step explanations."
+  }
+  ```
+
+### Scope Boundaries
+
+- Do NOT ingest these files — that's T11.
+- Only implement: create 6 `.json` files.
+
+### Files Expected
+
+**New files:**
+- `data/blueprints/technical-deep-dive.json`
+- `data/blueprints/executive-summary.json`
+- `data/blueprints/casual-explainer.json`
+- `data/blueprints/tutorial-stepwise.json`
+- `data/blueprints/news-brief.json`
+- `data/blueprints/opinion-essay.json`
+- `tests/test_blueprint_files.py`
+
+---
+
+## Task T20: CLI Subcommands
+
+> **Status:** done
+> **Effort:** s
+> **Priority:** medium
+> **Depends on:** T10 (knowledge ingestion graph), T11 (blueprint ingestion graph)
+> **Satisfies REQs:** R-CLI
+> **Footprint slice:** Modified: `src/blog_mas/cli.py`. New: `src/blog_mas/rag/ingest_cli.py`, `tests/test_cli.py` (extend)
+
+### Description
+
+Convert the single-purpose CLI to argparse subcommands: `blog-mas` (runtime, unchanged), `blog-mas ingest [--rebuild] [--path]`, `blog-mas ingest-blueprints [--rebuild]`, `blog-mas eval [--queries]`. The `--rebuild` flag triggers collection drop + recreate with polling.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/test_cli.py` (extend)
+
+#### Test Scenarios
+
+##### `Subcommand routing`
+
+- **default (no subcommand) runs runtime** — `main()` with no args starts the interactive loop
+- **`ingest` calls knowledge ingestion** — GIVEN `["ingest", "--path", "data/knowledge/"]`, WHEN parsed, THEN the ingestion graph is invoked
+- **`ingest --rebuild` drops and recreates collection** — verify `delete_collection_with_polling` is called before ingestion
+- **`ingest-blueprints` calls blueprint ingestion** — GIVEN `["ingest-blueprints"]`, WHEN parsed, THEN the blueprint ingestion graph is invoked
+- **`eval` calls recall harness** — GIVEN `["eval"]`, WHEN parsed, THEN the eval harness is invoked
+
+### Implementation Notes
+
+- **Module:** `cli.py` (modify), `rag/ingest_cli.py` (new — houses the subcommand handler functions)
+- **Pattern reference:** Python `argparse` subparsers.
+- **Key decisions:**
+  - Decision 6 (`--rebuild` flag with async-deletion polling).
+  - Default invocation (no subcommand) must remain the interactive runtime loop.
+- **`--rebuild` flow:** `store.delete_collection_with_polling(name)` → `store.ensure_collection(name, dim)` → run ingestion graph.
+
+### Scope Boundaries
+
+- Do NOT implement the eval harness itself — T22.
+- Do NOT modify agent or orchestrator code.
+- Only implement: argparse setup, subcommand handlers, `--rebuild` wiring.
+
+### Files Expected
+
+**New files:**
+- `src/blog_mas/rag/ingest_cli.py`
+
+**Modified files:**
+- `src/blog_mas/cli.py` — add argparse subcommands
+- `tests/test_cli.py` — add subcommand routing tests
+
+**Must NOT modify:**
+- `src/blog_mas/orchestrator.py` — G7
+- `src/blog_mas/agents/**` — G6
+
+---
+
+## Task T21: Eval Subcommand Wiring
+
+> **Status:** done
+> **Effort:** xs
+> **Priority:** medium
+> **Depends on:** T20 (CLI framework), T22 (recall@k harness)
+> **Satisfies REQs:** R-Eval (CLI surface); R-CLI (`blog-mas eval`)
+
+### Description
+
+Wire the `eval` CLI subcommand to invoke the `recall@k` test harness from T22. Small task — just CLI glue that calls the eval function with the query file path.
+
+### Test Plan
+
+#### Test File(s)
+- Covered by T20's CLI tests and T22's harness tests.
+
+#### Test Scenarios
+
+_(Covered by T20 and T22.)_
+
+### Implementation Notes
+
+- **Module:** `rag/ingest_cli.py` (add eval handler)
+- **Flow:** parse `--queries` path → load YAML → call `run_recall_eval(queries, store, embedder)` → print results.
+- **pytest-skip if Qdrant unreachable** — the eval handler should catch connection errors and print a helpful message.
+
+### Scope Boundaries
+
+- Do NOT implement the recall@k logic — T22.
+- Only implement: `eval` subcommand handler that wires to T22's function.
+
+### Files Expected
+
+**Modified files:**
+- `src/blog_mas/rag/ingest_cli.py` — add eval handler
+
+---
+
+## Task T22: Recall@k Eval Harness
+
+> **Status:** done
+> **Effort:** s
+> **Priority:** medium
+> **Depends on:** T9 (hybrid_search), T10 (ingestion — needs indexed data)
+> **Satisfies REQs:** R-Eval; Decision 16
+> **Footprint slice:** New: `tests/eval/__init__.py`, `tests/eval/queries.yaml`, `tests/eval/test_recall.py`
+
+### Description
+
+Implement the `recall@k` eval harness: a YAML file of labeled queries with expected doc IDs, and a pytest test that runs each query through the live retrieval stack and measures recall at k=1, 3, 10. Pytest-skips if Qdrant is unreachable.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/eval/test_recall.py`, `tests/eval/queries.yaml`
+
+#### Test Scenarios
+
+##### `Recall measurement`
+
+- **computes recall@1, recall@3, recall@10 per query** — GIVEN a query with expected doc_ids, WHEN retrieval runs, THEN measures whether each expected doc_id appears in top-1, top-3, top-10
+- **aggregates across all queries** — reports mean recall@1, @3, @10
+
+##### `Infrastructure guard`
+
+- **pytest.skip if Qdrant unreachable** — GIVEN Qdrant is down, WHEN test module loads, THEN pytest.skip is triggered
+
+### Implementation Notes
+
+- **Module:** `tests/eval/test_recall.py` (new)
+- **queries.yaml format:**
+  ```yaml
+  - query: "health benefits of Mediterranean diet"
+    expected_doc_ids: ["mediterranean-diet"]
+  - query: "AI machine learning applications"
+    expected_doc_ids: ["artificial-intelligence"]
+  ```
+- **Metric:** `recall@k = |expected ∩ retrieved_top_k| / |expected|` per query, averaged.
+- **Libraries:** `pyyaml` (for loading queries).
+
+### Scope Boundaries
+
+- Do NOT implement generation evals (RAGAS) — Out of Scope.
+- Only implement: `queries.yaml`, `test_recall.py` with recall computation + skip guard.
+
+### Files Expected
+
+**New files:**
+- `tests/eval/__init__.py`
+- `tests/eval/queries.yaml`
+- `tests/eval/test_recall.py`
+
+---
+
+## Task T23: Test Rewiring + KB Deletion
+
+> **Status:** done
+> **Effort:** s
+> **Priority:** high
+> **Depends on:** T15 (researcher rewrite), T17 (orchestrator wiring)
+> **Satisfies REQs:** R-NF-BackCompat; Decision 19
+> **Footprint slice:** Deleted: `src/blog_mas/knowledge_base.py`, `tests/test_knowledge_base.py`. Modified: any remaining imports of `knowledge_base`.
+
+### Description
+
+Delete `knowledge_base.py` and its test file. Remove any remaining imports of `knowledge_base` across the codebase (the researcher was rewritten in T15, but `cli.py` may still import `get_available_topics`). Ensure the full existing test suite is green after deletion.
+
+### Test Plan
+
+#### Test File(s)
+- No new test file. Validation is: the full test suite passes.
+
+#### Test Scenarios
+
+_(Validation: `pytest` exits 0.)_
+
+- **no remaining imports of `knowledge_base`** — `grep -r "knowledge_base" src/` returns nothing
+- **full test suite green** — `pytest` passes
+- **test_knowledge_base.py is gone** — file does not exist
+
+### Implementation Notes
+
+- **Files to delete:** `src/blog_mas/knowledge_base.py`, `tests/test_knowledge_base.py`.
+- **Files to check for imports:** `cli.py` (currently imports `get_available_topics`), any other file that references `knowledge_base`.
+- **cli.py fix:** `print_welcome()` currently lists topics from the KB. After deletion, either remove the topic listing or read from `data/knowledge/*.md` file names. Prefer file-name listing (simple).
+
+### Scope Boundaries
+
+- Do NOT add new test logic — only delete and fix imports.
+- Only implement: delete files, fix broken imports, verify suite green.
+
+### Files Expected
+
+**Deleted files:**
+- `src/blog_mas/knowledge_base.py`
+- `tests/test_knowledge_base.py`
+
+**Modified files:**
+- `src/blog_mas/cli.py` — remove `knowledge_base` import, fix `print_welcome`
+
+---
+
+## Task T24: Observability Wiring (LangSmith + structlog)
+
+> **Status:** done
+> **Effort:** s
+> **Priority:** low
+> **Depends on:** None
+> **Satisfies REQs:** R-Observability; F20
+> **Footprint slice:** New: `src/blog_mas/rag/observability.py`, `tests/rag/test_observability.py`
+
+### Description
+
+Wire structlog for structured local logs across RAG modules and configure LangSmith tracing with no-op fallback when `LANGCHAIN_API_KEY` is unset. Existing runtime agents continue to use stdlib logging — structlog is scoped to `rag/`.
+
+### Test Plan
+
+#### Test File(s)
+- `tests/rag/test_observability.py`
+
+#### Test Scenarios
+
+##### `structlog`
+
+- **configures structlog with stage/query/latency fields** — GIVEN structlog is configured, WHEN a log record is emitted, THEN it carries structured key-value pairs
+
+##### `LangSmith`
+
+- **tracer is no-op when LANGCHAIN_API_KEY unset** — GIVEN the env var is absent, WHEN tracer is initialized, THEN it does not raise and does not block _(verifies F20)_
+- **tracer is active when key present** — GIVEN the env var is set, WHEN tracer is initialized, THEN LangSmith tracing is enabled
+
+### Implementation Notes
+
+- **Module:** `rag/observability.py` (new)
+- **Key decisions:**
+  - Decision 18 (LangSmith + structlog).
+  - structlog scoped to `rag/` — runtime agents keep stdlib logging.
+- **Libraries:** `structlog` (added to pyproject.toml), `langsmith` (transitive dep via langchain).
+- **Integration:** RAG modules call `get_logger(stage="chunking")` etc. to get a bound structlog logger.
+
+### Scope Boundaries
+
+- Do NOT migrate runtime agents to structlog — explicitly Out of Scope.
+- Do NOT modify `logging_config.py` — stdlib config preserved.
+- Only implement: structlog config, LangSmith no-op wiring, `get_logger` helper.
+
+### Files Expected
+
+**New files:**
+- `src/blog_mas/rag/observability.py`
+- `tests/rag/test_observability.py`
+
+**Modified files:**
+- `pyproject.toml` — add `structlog`
+
+**Must NOT modify:**
+- `src/blog_mas/logging_config.py` — stdlib config preserved
+- `src/blog_mas/agents/**` — no structlog in agents
+
+---
+
+### TDD Sequence (G3–G11)
+
+**Dependency order:**
+
+```
+G3 (T9) ─────────────────────────────────────────┐
+G4 (T10, T11) ← depends on G1+G2+T9              │
+G5 (T12, T13) ← T12 first, then T13              │
+G6 (T14, T15, T16) ← depends on T9, T12, T13     │
+G7 (T17) ← depends on T13, T14, T15, T16         │
+G8 (T18, T19) ← independent, can run early       │
+G9 (T20, T21) ← depends on T10, T11, T22         │
+G10 (T22, T23) ← T22 depends on T9+T10; T23 last │
+G11 (T24) ← independent, can run anytime         │
+```
+
+**Recommended serial order:**
+T9 → T10 → T11 → T12 → T13 → T14 → T15 → T16 → T17 → T18 → T19 → T20 → T22 → T21 → T23 → T24
+
+**Can parallelize:** T18/T19 (data files) and T24 (observability) are independent of everything else. T14/T15/T16 can run in parallel after T9+T12+T13.

@@ -15,11 +15,11 @@ class TestCliStartup:
         print_welcome()
         output = capsys.readouterr().out
         assert "Blog" in output
-        assert "Mediterranean diet" in output
-        assert "Artificial intelligence" in output
-        assert "Climate change" in output
-        assert "Space exploration" in output
-        assert "Mental health" in output
+        assert "Mediterranean Diet" in output
+        assert "Artificial Intelligence" in output
+        assert "Climate Change" in output
+        assert "Space Exploration" in output
+        assert "Mental Health" in output
 
 
 class TestInputValidation:
@@ -194,7 +194,47 @@ class TestMain:
     def test_main_calls_asyncio_run(self):
         from blog_mas.cli import main
 
-        with patch("blog_mas.cli.setup_logging"):
-            with patch("blog_mas.cli.asyncio.run") as mock_run:
-                main()
-                mock_run.assert_called_once()
+        with patch("blog_mas.cli.setup_logging"), \
+             patch("sys.argv", ["blog-mas"]), \
+             patch("blog_mas.cli.asyncio.run") as mock_run:
+            main()
+            mock_run.assert_called_once()
+
+
+class TestSubcommandRouting:
+    def test_ingest_calls_cmd_ingest(self):
+        from blog_mas.cli import main
+
+        with patch("blog_mas.cli.setup_logging"), \
+             patch("sys.argv", ["blog-mas", "ingest", "--path", "data/knowledge"]), \
+             patch("blog_mas.rag.ingest_cli.cmd_ingest") as mock_cmd:
+            main()
+            mock_cmd.assert_called_once()
+            assert mock_cmd.call_args[0][0].path == "data/knowledge"
+
+    def test_ingest_rebuild_flag(self):
+        from blog_mas.cli import main
+
+        with patch("blog_mas.cli.setup_logging"), \
+             patch("sys.argv", ["blog-mas", "ingest", "--rebuild"]), \
+             patch("blog_mas.rag.ingest_cli.cmd_ingest") as mock_cmd:
+            main()
+            assert mock_cmd.call_args[0][0].rebuild is True
+
+    def test_ingest_blueprints_calls_cmd(self):
+        from blog_mas.cli import main
+
+        with patch("blog_mas.cli.setup_logging"), \
+             patch("sys.argv", ["blog-mas", "ingest-blueprints"]), \
+             patch("blog_mas.rag.ingest_cli.cmd_ingest_blueprints") as mock_cmd:
+            main()
+            mock_cmd.assert_called_once()
+
+    def test_no_subcommand_runs_interactive(self):
+        from blog_mas.cli import main
+
+        with patch("blog_mas.cli.setup_logging"), \
+             patch("sys.argv", ["blog-mas"]), \
+             patch("blog_mas.cli.asyncio.run") as mock_run:
+            main()
+            mock_run.assert_called_once()

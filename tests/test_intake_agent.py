@@ -3,8 +3,8 @@
 import pytest
 
 from blog_mas.agents.intake import intake_node
-from blog_mas.mcp.models import BlogSpec
-from tests.conftest import make_config, make_failing_llm, make_mock_llm
+from blog_mas.mcp.models import BlogSpec, GoalDecomposition
+from tests.conftest import make_config, make_failing_llm, make_mock_llm, make_mock_llm_sequence
 
 
 def _make_blog_spec(
@@ -82,3 +82,46 @@ class TestIntakeAgentFailure:
                 {"raw_input": "Write about AI"},
                 config={"configurable": {}},
             )
+
+
+class TestGoalDecomposition:
+    @pytest.mark.asyncio
+    async def test_emits_intent_and_topic_query(self):
+        spec = _make_blog_spec()
+        goal = GoalDecomposition(intent_query="technical deep dive", topic_query="Mediterranean diet")
+        llm = make_mock_llm_sequence([spec, goal])
+
+        result = await intake_node(
+            {"raw_input": "Write about the Mediterranean diet"},
+            config=make_config(llm),
+        )
+
+        assert result["intent_query"] == "technical deep dive"
+        assert result["topic_query"] == "Mediterranean diet"
+
+    @pytest.mark.asyncio
+    async def test_llm_fails_uses_deterministic_fallback(self):
+        spec = _make_blog_spec()
+        # First call succeeds (BlogSpec), second and third fail (GoalDecomposition retries)
+        llm = make_mock_llm_sequence([spec, ConnectionError("down"), ConnectionError("still down")])
+
+        result = await intake_node(
+            {"raw_input": "Write about the Mediterranean diet"},
+            config=make_config(llm),
+        )
+
+        assert result["intent_query"] == "informative and engaging educate the reader for general readers"
+        assert result["topic_query"] == "Mediterranean diet"
+
+    @pytest.mark.asyncio
+    async def test_deterministic_fallback_produces_non_empty(self):
+        spec = _make_blog_spec()
+        llm = make_mock_llm_sequence([spec, ConnectionError("fail"), ConnectionError("fail")])
+
+        result = await intake_node(
+            {"raw_input": "Write about AI"},
+            config=make_config(llm),
+        )
+
+        assert len(result["intent_query"].strip()) > 0
+        assert len(result["topic_query"].strip()) > 0

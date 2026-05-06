@@ -1,45 +1,40 @@
-"""Researcher agent: synthesizes knowledge base content into research bullet points."""
+"""Researcher agent: hybrid retrieval → citation prompt → synthesis."""
 
 import logging
 
 from langchain_core.runnables import RunnableConfig
 
 from blog_mas.agent_helpers import run_agent_chain
-from blog_mas.knowledge_base import lookup_topic
-from blog_mas.mcp.models import ResearchRequest, ResearchSummary
+from blog_mas.mcp.models import ResearchSummary
 from blog_mas.prompts import RESEARCHER_SYSTEM_PROMPT
+from blog_mas.rag.retrieval import hybrid_search
+from blog_mas.rag.vector_store import ScoredPoint
 from blog_mas.state import BlogState
 
 logger = logging.getLogger(__name__)
 
 
 async def research_node(state: BlogState, config: RunnableConfig) -> dict:
-    """Look up a topic in the knowledge base and synthesize it into bullet points."""
     blog_spec = state.get("blog_spec")
     if blog_spec is None:
         raise ValueError("[Researcher] Upstream agent failed — no blog spec in state")
 
-    ResearchRequest(topic=blog_spec.topic, audience=blog_spec.audience, goal=blog_spec.goal)
+    query = state.get("topic_query") or blog_spec.topic
+    logger.info('[Researcher] Retrieving chunks for: "%s"', query)
 
-    logger.info('[Researcher] Looking up topic: "%s"', blog_spec.topic)
-    kb_content = lookup_topic(blog_spec.topic)
+    store = config["configurable"].get("store")
+    embedder = config["configurable"].get("embedder")
+    reranker = config["configurable"].get("reranker")
 
-    if kb_content is not None:
-        logger.info("[Researcher] Topic found in knowledge base. Synthesizing...")
-        user_message = (
-            f"Topic: {blog_spec.topic}\n"
-            f"Audience: {blog_spec.audience}\n"
-            f"Goal: {blog_spec.goal}\n\n"
-            f"Source material:\n{kb_content}"
+    chunks = []
+    if store and embedder and reranker:
+        chunks = hybrid_search(
+            query=query, namespace="knowledge", top_k=3,
+            store=store, embedder=embedder, reranker=reranker,
         )
-    else:
-        logger.info("[Researcher] Topic not found. Proceeding with limited information.")
-        user_message = (
-            f"Topic: {blog_spec.topic}\n"
-            f"Audience: {blog_spec.audience}\n"
-            f"Goal: {blog_spec.goal}\n\n"
-            "No information found on this topic in the knowledge base."
-        )
+        logger.info("[Researcher] retrieved %d chunks", len(chunks))
+
+    user_message = _build_user_message(chunks, blog_spec)
 
     summary = await run_agent_chain(
         config=config,
@@ -49,4 +44,28 @@ async def research_node(state: BlogState, config: RunnableConfig) -> dict:
         agent_name="Researcher",
     )
 
+    # Override source with actual chunk IDs when we have them
+    if chunks and summary.source != "none":
+        chunk_ids = ",".join(c.id for c in chunks if c.id in user_message)
+        if chunk_ids:
+            summary = ResearchSummary(
+                topic=summary.topic,
+                bullet_points=summary.bullet_points,
+                source=chunk_ids,
+            )
+
     return {"research_summary": summary}
+
+
+def _build_user_message(chunks: list[ScoredPoint], blog_spec) -> str:
+    header = f"Topic: {blog_spec.topic}\nAudience: {blog_spec.audience}\nGoal: {blog_spec.goal}"
+
+    if not chunks:
+        return f"{header}\n\nNo source material was found for this topic."
+
+    citations = []
+    for c in chunks:
+        text = c.payload.get("raw_text", "")
+        citations.append(f"[Source {c.id}]\n{text}")
+
+    return f"{header}\n\nSource material:\n" + "\n\n".join(citations)

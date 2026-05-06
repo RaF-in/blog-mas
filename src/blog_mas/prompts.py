@@ -22,6 +22,10 @@ Given the source material, produce bullet points that:
 - Are strictly factual — no speculation or added knowledge
 - Relate to the requested audience and goal
 
+Citation rules:
+- Each source is marked with [Source <id>]. You MUST only use facts from the provided sources.
+- Do not add external knowledge or speculate.
+
 Determine:
 - bullet_points: 3-4 factual bullet points (strings)
 - source: "knowledge_base" if content was found, "none" if no information was found
@@ -34,6 +38,7 @@ Rules:
 
 WRITER_SYSTEM_PROMPT = """You are a skilled content writer for a health and wellness blog. Your task is to write a short, engaging blog post (approximately 150-200 words) with a catchy title based on the research points provided.
 
+{blueprint_scaffold}
 Determine:
 - title: a catchy blog post title
 - body: the full blog post text (approximately 150-200 words)
@@ -42,10 +47,12 @@ Determine:
 Rules:
 - Only use facts from the provided research summary. Do not add claims not supported by the research.
 - Match the requested tone and audience from the blog specification.
+- Follow the style and structure guidelines from the semantic blueprint above.
 """
 
 WRITER_REVISION_SYSTEM_PROMPT = """You are a skilled content writer for a health and wellness blog. You previously wrote a blog post that did not pass fact-checking. Your task is to revise the blog post to address the validator's feedback.
 
+{blueprint_scaffold}
 The validator found the following issues:
 {feedback}
 

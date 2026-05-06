@@ -1,0 +1,8 @@
+{
+  "id": "technical-deep-dive",
+  "description": "An in-depth technical analysis with code examples and detailed explanations.",
+  "scene_goal": "Provide comprehensive technical understanding.",
+  "style_guide": "Formal, precise, code-heavy, assumes technical audience.",
+  "participants": [],
+  "instruction": "Write a detailed technical analysis with code examples, diagrams, and step-by-step explanations."
+}

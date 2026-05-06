@@ -1,0 +1,8 @@
+{
+  "id": "news-brief",
+  "description": "A short news-style brief covering the key facts of a development or event.",
+  "scene_goal": "Inform the reader quickly with the most important facts.",
+  "style_guide": "Journalistic, inverted pyramid, factual, quotes where relevant.",
+  "participants": [],
+  "instruction": "Write a news brief covering who, what, when, where, and why in a concise journalistic style."
+}

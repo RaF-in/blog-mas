@@ -1,4 +1,4 @@
-"""Writer agent: generates or revises a blog post draft from research + spec."""
+"""Writer agent: generates or revises a blog post draft from research + spec + blueprint."""
 
 import logging
 
@@ -12,6 +12,11 @@ from blog_mas.state import BlogState
 logger = logging.getLogger(__name__)
 
 
+def _blueprint_scaffold(blueprint) -> str:
+    json_str = blueprint.model_dump_json()
+    return f"--- SEMANTIC BLUEPRINT (JSON) ---\n{json_str}\n--- END SEMANTIC BLUEPRINT ---"
+
+
 async def write_node(state: BlogState, config: RunnableConfig) -> dict:
     """Generate or revise a blog post draft and return a BlogDraft."""
     blog_spec = state.get("blog_spec")
@@ -22,6 +27,10 @@ async def write_node(state: BlogState, config: RunnableConfig) -> dict:
     if research_summary is None:
         raise ValueError("[Writer] Upstream agent failed — no research summary in state")
 
+    blueprint = state.get("blueprint")
+    if blueprint is None:
+        raise ValueError("[Writer] Upstream agent failed — no blueprint in state")
+
     revision_feedback = state.get("revision_feedback")
     is_revision = revision_feedback is not None
 
@@ -31,11 +40,15 @@ async def write_node(state: BlogState, config: RunnableConfig) -> dict:
         revision_feedback=revision_feedback,
     )
 
+    scaffold = _blueprint_scaffold(blueprint)
+
     if is_revision:
         clean_feedback = sanitize_feedback(revision_feedback)
-        system_prompt = WRITER_REVISION_SYSTEM_PROMPT.format(feedback=clean_feedback)
+        system_prompt = WRITER_REVISION_SYSTEM_PROMPT.format(
+            blueprint_scaffold=scaffold, feedback=clean_feedback,
+        )
     else:
-        system_prompt = WRITER_SYSTEM_PROMPT
+        system_prompt = WRITER_SYSTEM_PROMPT.format(blueprint_scaffold=scaffold)
 
     lines = ["Research summary:"]
     for bp in research_summary.bullet_points:

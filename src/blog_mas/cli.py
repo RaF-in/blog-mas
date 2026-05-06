@@ -1,13 +1,41 @@
-"""CLI: interactive loop for the multi-agent blog generation system."""
+"""CLI: interactive loop + ingestion subcommands."""
 
+import argparse
 import asyncio
+from pathlib import Path
 
 from blog_mas.llm import create_llm
 from blog_mas.logging_config import setup_logging
-from blog_mas.knowledge_base import get_available_topics
 from blog_mas.orchestrator import run_pipeline_async
 
 MAX_INPUT_LENGTH = 500
+
+
+def build_parser():
+    parser = argparse.ArgumentParser(prog="blog-mas", description="Multi-agent blog generation system")
+    sub = parser.add_subparsers(dest="command")
+
+    p_ingest = sub.add_parser("ingest", help="Ingest knowledge markdown files")
+    p_ingest.add_argument("--path", default="data/knowledge", help="Source directory")
+    p_ingest.add_argument("--rebuild", action="store_true", help="Drop and recreate collection")
+
+    p_bp = sub.add_parser("ingest-blueprints", help="Ingest blueprint JSON files")
+    p_bp.add_argument("--rebuild", action="store_true", help="Drop and recreate collection")
+
+    p_eval = sub.add_parser("eval", help="Run recall evaluation")
+    p_eval.add_argument("--queries", default=None, help="Path to queries JSON")
+
+    return parser
+
+
+KNOWLEDGE_DIR = Path(__file__).resolve().parent.parent.parent / "data" / "knowledge"
+
+
+def get_available_topics() -> list[str]:
+    return sorted(
+        p.stem.replace("-", " ").title()
+        for p in KNOWLEDGE_DIR.glob("*.md")
+    )
 
 
 def print_welcome():
@@ -88,7 +116,20 @@ async def async_main(llm=None):
 
 def main():
     setup_logging()
-    asyncio.run(async_main())
+    parser = build_parser()
+    args = parser.parse_args()
+
+    if args.command == "ingest":
+        from blog_mas.rag.ingest_cli import cmd_ingest
+        cmd_ingest(args)
+    elif args.command == "ingest-blueprints":
+        from blog_mas.rag.ingest_cli import cmd_ingest_blueprints
+        cmd_ingest_blueprints(args)
+    elif args.command == "eval":
+        from blog_mas.rag.ingest_cli import cmd_eval
+        cmd_eval(args)
+    else:
+        asyncio.run(async_main())
 
 
 if __name__ == "__main__":

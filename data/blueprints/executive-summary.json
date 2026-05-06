@@ -1,0 +1,8 @@
+{
+  "id": "executive-summary",
+  "description": "A concise executive briefing with key takeaways and actionable recommendations.",
+  "scene_goal": "Enable quick decision-making with minimal reading.",
+  "style_guide": "Concise, professional, bullet-point heavy, no jargon.",
+  "participants": [],
+  "instruction": "Write a concise executive summary with clear takeaways and recommendations in bullet-point format."
+}

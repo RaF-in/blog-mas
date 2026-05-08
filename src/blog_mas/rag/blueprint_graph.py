@@ -2,6 +2,7 @@
 
 import hashlib
 import logging
+import uuid
 from pathlib import Path
 
 from blog_mas.rag.blueprints import validate_blueprint_payload
@@ -53,7 +54,7 @@ def run_blueprint_ingestion(
 
     points = []
     for bp_id, vec, payload in zip(bp_ids, vectors, payloads):
-        points.append({"id": bp_id, "vector": vec, "payload": payload})
+        points.append({"id": str(uuid.UUID(bp_id[:32])), "vector": vec, "payload": payload})
 
     store.upsert_points(namespace, points)
     logger.info("blueprint_graph.upserted namespace=%s count=%d", namespace, len(points))

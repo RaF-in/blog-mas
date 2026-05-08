@@ -8,8 +8,6 @@ from blog_mas.rag.blueprint_graph import run_blueprint_ingestion
 from blog_mas.rag.ingestion_graph import run_ingestion
 from blog_mas.rag.embedding import EmbeddingClient
 from blog_mas.rag.vector_store import QdrantStore
-from tests.conftest import FakeEmbedder, FakeReranker, FakeVectorStore
-
 logger = logging.getLogger(__name__)
 
 

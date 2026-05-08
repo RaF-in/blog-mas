@@ -89,11 +89,17 @@ async def process_request(raw_input: str, llm=None) -> dict:
     return await run_pipeline_async(raw_input=raw_input, llm=llm)
 
 
-async def async_main(llm=None):
+async def async_main(llm=None, store=None, embedder=None):
     print_welcome()
 
     if llm is None:
         llm = create_llm()
+    if store is None:
+        from blog_mas.rag.vector_store import QdrantStore
+        store = QdrantStore()
+    if embedder is None:
+        from blog_mas.rag.embedding import EmbeddingClient
+        embedder = EmbeddingClient()
 
     while True:
         try:
@@ -110,7 +116,7 @@ async def async_main(llm=None):
         if validated is None:
             continue
 
-        result = await run_pipeline_async(raw_input=validated, llm=llm)
+        result = await run_pipeline_async(raw_input=validated, llm=llm, store=store, embedder=embedder)
         display_result(result)
 
 

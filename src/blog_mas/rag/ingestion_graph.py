@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import os
+import uuid
 from pathlib import Path
 
 from blog_mas.rag.chunking.contextual import contextualize_chunks
@@ -68,7 +69,7 @@ async def _run_async(
         points = []
         for chunk, vec in zip(all_chunks, vectors):
             points.append({
-                "id": chunk.content_hash,
+                "id": str(uuid.UUID(chunk.content_hash[:32])),
                 "vector": vec,
                 "payload": {
                     "raw_text": chunk.raw_text,

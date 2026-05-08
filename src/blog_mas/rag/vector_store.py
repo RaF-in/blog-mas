@@ -97,11 +97,11 @@ class QdrantStore:
     def dense_search(
         self, name: str, query_vec: list[float], top_n: int = 20
     ) -> list[ScoredPoint]:
-        hits = self._client.search(
+        hits = self._client.query_points(
             collection_name=name,
-            query_vector=query_vec,
+            query=query_vec,
             limit=top_n,
-        )
+        ).points
         return [
             ScoredPoint(id=str(h.id), score=h.score, payload=h.payload)
             for h in hits
@@ -115,11 +115,16 @@ class QdrantStore:
             sparse_vectors = list(model.embed([query_text]))
             sparse_vec = sparse_vectors[0]
 
-            from qdrant_client.models import NamedSparseVector
+            from qdrant_client.models import SparseVector
+
+            sparse_query = SparseVector(
+                indices=sparse_vec.indices.tolist(),
+                values=sparse_vec.values.tolist(),
+            )
 
             hits = self._client.query_points(
                 collection_name=name,
-                query=sparse_vec,
+                query=sparse_query,
                 using="bm25",
                 limit=top_n,
             ).points

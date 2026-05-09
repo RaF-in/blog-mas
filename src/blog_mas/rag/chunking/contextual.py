@@ -41,7 +41,6 @@ async def contextualize_chunks(
     On LLM failure for any chunk, falls back to ``contextualized_text = raw_text``.
     """
     windows = _build_windows(doc_text)
-
     for chunk in chunks:
         window = _find_window(chunk, doc_text, windows)
         context = await _get_context(chunk.raw_text, window, llm)

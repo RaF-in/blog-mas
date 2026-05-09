@@ -1,38 +1,39 @@
-"""LLM factory: creates a ChatHuggingFace instance for the pipeline."""
+"""LLM factory: creates a ChatOpenAI instance pointed at local LM Studio."""
 
 import logging
 import os
 
 from dotenv import load_dotenv
-from langchain_huggingface import ChatHuggingFace, HuggingFaceEndpoint
+from langchain_openai import ChatOpenAI
 
 load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+DEFAULT_MODEL = "qwen/qwen3.5-9b"
+DEFAULT_LM_STUDIO_URL = "http://127.0.0.1:1234"
 
 
 def create_llm(
     model: str | None = None,
     temperature: float = 0.3,
-    api_key: str | None = None,
-) -> ChatHuggingFace:
-    """Create a ChatHuggingFace LLM for structured output.
+    base_url: str | None = None,
+) -> ChatOpenAI:
+    """Create a ChatOpenAI LLM pointed at local LM Studio.
 
     Args:
-        model: HuggingFace model repo ID (defaults to Qwen2.5-7B-Instruct).
+        model: Model name as loaded in LM Studio (defaults to qwen2.5-7b-instruct).
         temperature: Sampling temperature.
-        api_key: HuggingFace API token. Falls back to HF_TOKEN from .env.
+        base_url: LM Studio base URL. Falls back to LM_STUDIO_URL env var,
+                  then http://127.0.0.1:1234.
 
     Returns:
-        A ChatHuggingFace instance ready for .with_structured_output().
+        A ChatOpenAI instance ready for .with_structured_output().
     """
-    token = api_key or os.environ.get("HF_TOKEN")
-    endpoint = HuggingFaceEndpoint(
-        repo_id=model or DEFAULT_MODEL,
-        task="text-generation",
+    url = (base_url or os.environ.get("LM_STUDIO_URL") or DEFAULT_LM_STUDIO_URL).rstrip("/")
+    return ChatOpenAI(
+        model=model or DEFAULT_MODEL,
         temperature=temperature,
-        huggingfacehub_api_token=token,
+        base_url=f"{url}/v1",
+        api_key="lm-studio",
     )
-    return ChatHuggingFace(llm=endpoint)

@@ -1,13 +1,16 @@
-"""HF Inference batched embeddings with tenacity retries and adaptive halving.
+"""Local LM Studio batched embeddings with tenacity retries and adaptive halving.
 
 Single entrypoint every other module uses to produce embeddings — chunking,
 retrieval, and ingestion graphs all depend on it.
+
+Uses the OpenAI-compatible /v1/embeddings endpoint served by LM Studio at
+http://127.0.0.1:1234 (configurable via LM_STUDIO_URL env var).
 """
 
 import logging
 import os
 
-from huggingface_hub import InferenceClient
+import httpx
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -17,7 +20,8 @@ from tenacity import (
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_EMBEDDING_MODEL = "BAAI/bge-small-en-v1.5"
+DEFAULT_EMBEDDING_MODEL = "text-embedding-bge-small-en-v1.5"
+DEFAULT_LM_STUDIO_URL = "http://127.0.0.1:1234"
 _DEFAULT_BATCH_SIZE = 100
 
 
@@ -29,16 +33,22 @@ class TransientError(Exception):
 
 
 class EmbeddingClient:
-    """Wraps HF Inference text-embedding endpoint with retries and adaptive halving."""
+    """Wraps LM Studio /v1/embeddings endpoint with retries and adaptive halving."""
 
     def __init__(
         self,
         model: str | None = None,
-        token: str | None = None,
+        base_url: str | None = None,
     ) -> None:
         self._model = model or DEFAULT_EMBEDDING_MODEL
-        self._token = token or os.environ.get("HF_TOKEN")
-        self._client = InferenceClient(token=self._token)
+        self._base_url = (base_url or os.environ.get("LM_STUDIO_URL") or DEFAULT_LM_STUDIO_URL).rstrip("/")
+        self._client = httpx.Client(timeout=60.0)
+
+    def __del__(self):
+        try:
+            self._client.close()
+        except Exception:
+            pass
 
     @retry(
         retry=retry_if_exception_type((ConnectionError, TimeoutError, TransientError)),
@@ -48,15 +58,22 @@ class EmbeddingClient:
     )
     def _call_endpoint(self, texts: list[str]) -> list[list[float]]:
         try:
-            response = self._client.feature_extraction(texts, model=self._model)
-            return response
-        except Exception as exc:
-            status = getattr(exc, "status_code", None) or getattr(
-                getattr(exc, "response", None), "status_code", None
+            response = self._client.post(
+                f"{self._base_url}/v1/embeddings",
+                json={"model": self._model, "input": texts},
             )
+            response.raise_for_status()
+            data = response.json()
+            # OpenAI-compatible format: {"data": [{"embedding": [...], "index": 0}, ...]}
+            sorted_items = sorted(data["data"], key=lambda x: x["index"])
+            return [item["embedding"] for item in sorted_items]
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
             if status in (429, 502, 503):
                 raise TransientError(status, str(exc)) from exc
             raise
+        except KeyError as exc:
+            raise RuntimeError(f"Unexpected embedding response format: {exc}") from exc
 
     def embed_batch(self, texts: list[str]) -> list[list[float]]:
         """Embed a batch of texts, handling rate limits and size errors.

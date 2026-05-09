@@ -24,8 +24,13 @@ async def write_node(state: BlogState, config: RunnableConfig) -> dict:
         raise ValueError("[Writer] Upstream agent failed — no blog spec in state")
 
     research_summary = state.get("research_summary")
-    if research_summary is None:
-        raise ValueError("[Writer] Upstream agent failed — no research summary in state")
+    previous_content = state.get("previous_content")
+
+    if research_summary is None and previous_content is None:
+        raise ValueError(
+            "[Writer] Upstream agent failed — no research summary in state "
+            "(and no previous_content for rewrite mode)."
+        )
 
     blueprint = state.get("blueprint")
     if blueprint is None:
@@ -33,12 +38,15 @@ async def write_node(state: BlogState, config: RunnableConfig) -> dict:
 
     revision_feedback = state.get("revision_feedback")
     is_revision = revision_feedback is not None
+    is_rewrite = previous_content is not None and research_summary is None
 
-    WriterInput(
-        research_summary=research_summary,
-        blog_spec=blog_spec,
-        revision_feedback=revision_feedback,
-    )
+    # Validate via WriterInput only in fresh mode (it requires research_summary)
+    if not is_rewrite:
+        WriterInput(
+            research_summary=research_summary,
+            blog_spec=blog_spec,
+            revision_feedback=revision_feedback,
+        )
 
     scaffold = _blueprint_scaffold(blueprint)
 
@@ -50,21 +58,37 @@ async def write_node(state: BlogState, config: RunnableConfig) -> dict:
     else:
         system_prompt = WRITER_SYSTEM_PROMPT.format(blueprint_scaffold=scaffold)
 
-    lines = ["Research summary:"]
-    for bp in research_summary.bullet_points:
-        lines.append(f"- {bp}")
-    lines.append("")
-    lines.append("Blog specification:")
-    lines.append(f"- Tone: {blog_spec.tone}")
-    lines.append(f"- Audience: {blog_spec.audience}")
-    lines.append(f"- Goal: {blog_spec.goal}")
-    if blog_spec.constraints:
-        lines.append(f"- Constraints: {', '.join(blog_spec.constraints)}")
-
-    user_message = "\n".join(lines)
+    if is_rewrite:
+        prev_body = previous_content.body if hasattr(previous_content, "body") else str(previous_content)
+        lines = [
+            "PREVIOUS CONTENT (rewrite this in the new blueprint's style):",
+            prev_body,
+            "",
+            "Blog specification:",
+            f"- Tone: {blog_spec.tone}",
+            f"- Audience: {blog_spec.audience}",
+            f"- Goal: {blog_spec.goal}",
+        ]
+        if blog_spec.constraints:
+            lines.append(f"- Constraints: {', '.join(blog_spec.constraints)}")
+        user_message = "\n".join(lines)
+    else:
+        lines = ["Research summary:"]
+        for bp in research_summary.bullet_points:
+            lines.append(f"- {bp}")
+        lines.append("")
+        lines.append("Blog specification:")
+        lines.append(f"- Tone: {blog_spec.tone}")
+        lines.append(f"- Audience: {blog_spec.audience}")
+        lines.append(f"- Goal: {blog_spec.goal}")
+        if blog_spec.constraints:
+            lines.append(f"- Constraints: {', '.join(blog_spec.constraints)}")
+        user_message = "\n".join(lines)
 
     if is_revision:
         logger.info("[Writer] Revising draft based on feedback...")
+    elif is_rewrite:
+        logger.info("[Writer] Rewriting previous content in new style...")
     else:
         logger.info("[Writer] Drafting blog post...")
 

@@ -115,3 +115,57 @@ class SummaryResult(BaseModel):
     input_tokens: int = Field(ge=0)
     output_tokens: int = Field(ge=0)
     reduction_percent: float = Field(ge=0.0, le=100.0)
+
+
+# ---------------------------------------------------------------------------
+# Chapter 7 — High-Fidelity Researcher models
+# ---------------------------------------------------------------------------
+
+class SynthesizedAnswer(BaseModel):
+    """What the LLM returns from the hi-fi Researcher synthesis step.
+
+    The LLM is given numbered passages [1], [2], [3] … and asked to:
+      1. Write the answer using only those passages.
+      2. Cite inline with [N] markers.
+      3. Return the exact list of passage IDs it cited.
+
+    We trust the answer text (with its [N] markers) but we rebuild the
+    Sources: block deterministically from cited_passage_ids — the
+    "belt and suspenders" move from Chapter 7 §B.
+    """
+    answer: str = Field(
+        max_length=5_000,
+        description=(
+            "Prose answer with inline [N] citation markers matching the "
+            "numbered passages supplied in the user prompt."
+        ),
+    )
+    cited_passage_ids: list[int] = Field(
+        description=(
+            "List of passage numbers (1-based) that were cited in the answer. "
+            "Used to programmatically rebuild the Sources list."
+        ),
+    )
+
+
+class CitedAnswer(BaseModel):
+    """Full output contract for the Chapter 7 Hi-Fi Researcher agent.
+
+    Contains the synthesized answer (with inline citations), the deterministic
+    source list, and observability counters so downstream agents and the CLI
+    can surface data quality information.
+    """
+    answer: str = Field(
+        max_length=5_000,
+        description="Prose answer with inline [N] citation markers.",
+    )
+    sources: list[str] = Field(
+        description=(
+            "Sorted unique list of source document names (doc_id) that were "
+            "actually cited.  Built deterministically from the passage→doc_id "
+            "mapping — never from the LLM's claimed sources."
+        ),
+    )
+    passages_retrieved: int = Field(ge=0, description="Total chunks returned by hybrid_search.")
+    passages_used: int = Field(ge=0, description="Chunks that survived sanitization and were cited.")
+    passages_rejected: int = Field(ge=0, description="Chunks blocked by the sanitizer.")

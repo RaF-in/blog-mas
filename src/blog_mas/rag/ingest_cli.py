@@ -32,6 +32,28 @@ def cmd_ingest(args):
     )
     print("Knowledge ingestion complete.")
 
+    # Chapter 7 §F — run the verification probe suite after every ingestion
+    # so we can assert the metadata (source provenance) made it into the index.
+    if getattr(args, "verify", False):
+        from blog_mas.rag.verification import verify_ingestion
+        print("Running ingestion verification probes...")
+        # Default probe suite covers the 5 knowledge docs shipped with blog-mas.
+        probes = [
+            ("artificial intelligence machine learning", "artificial-intelligence"),
+            ("climate change greenhouse gas emissions", "climate-change"),
+            ("Mediterranean diet health benefits", "mediterranean-diet"),
+            ("mental health anxiety depression", "mental-health"),
+            ("space exploration Mars missions", "space-exploration"),
+        ]
+        report = verify_ingestion(
+            store=store,
+            embedder=embedder,
+            namespace="knowledge",
+            probes=probes,
+            assert_on_failure=False,  # print report but don't crash CLI
+        )
+        print(report.summary())
+
 
 def cmd_ingest_blueprints(args):
     store = QdrantStore()

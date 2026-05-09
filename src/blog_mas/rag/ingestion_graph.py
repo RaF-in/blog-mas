@@ -1,4 +1,14 @@
-"""Knowledge ingestion: load .md files → chunk pipeline → embed → upsert."""
+"""Knowledge ingestion: load .md files → chunk pipeline → embed → upsert.
+
+Chapter 7 defense-in-depth: the sanitizer runs as a second ring of defense
+at ingest time, before chunks ever reach the vector store.  This catches
+poisoned source documents before they can be retrieved by a legitimate query
+and used in a prompt-injection attack (Chapter 7 §B).
+
+Chunks that fail sanitization are skipped and logged — they are never
+embedded or upserted.  The ingestion log will show which documents triggered
+rejections so a data engineer can review and remediate the source files.
+"""
 
 import asyncio
 import logging
@@ -12,6 +22,7 @@ from blog_mas.rag.chunking.recursive import recursive_split
 from blog_mas.rag.chunking.structural import split_by_headers
 from blog_mas.rag.chunking.types import IngestionDoc
 from blog_mas.rag.vector_store import ScoredPoint
+from blog_mas.security.sanitizer import sanitize_chunk
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +72,31 @@ async def _run_async(
         # Stage 4: contextualize (LLM)
         all_chunks = await contextualize_chunks(all_chunks, raw_text, llm)
 
+        # Stage 4b: sanitize — Chapter 7 §B defense-in-depth (second ring).
+        # Chunks that contain injection patterns are dropped before embedding.
+        # This prevents poisoned source documents from ever reaching the vector
+        # store, where a later legitimate query could retrieve them.
+        clean_chunks = []
+        ingest_rejected = 0
+        for chunk in all_chunks:
+            result = sanitize_chunk(chunk.raw_text)
+            if result.ok:
+                clean_chunks.append(chunk)
+            else:
+                ingest_rejected += 1
+                logger.warning(
+                    "ingestion.sanitizer_rejected doc=%s chunk_hash=%s pattern=%r",
+                    doc_id, chunk.content_hash[:12], result.matched_pattern,
+                )
+
+        if ingest_rejected:
+            logger.warning(
+                "ingestion.rejected_summary doc=%s rejected=%d kept=%d",
+                doc_id, ingest_rejected, len(clean_chunks),
+            )
+
+        all_chunks = clean_chunks
+
         # Stage 5: embed
         texts = [c.contextualized_text or c.raw_text for c in all_chunks]
         vectors = embedder.embed_batch(texts)
@@ -83,4 +119,7 @@ async def _run_async(
             })
 
         store.upsert_points(namespace, points)
-        logger.info("ingestion.upserted namespace=%s doc=%s points=%d", namespace, doc_id, len(points))
+        logger.info(
+            "ingestion.upserted namespace=%s doc=%s points=%d rejected=%d",
+            namespace, doc_id, len(points), ingest_rejected,
+        )

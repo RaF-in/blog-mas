@@ -108,3 +108,47 @@ SUMMARIZER_USER_PROMPT_TEMPLATE = """\
 --- END TEXT ---
 
 Generate the summary now."""
+
+# ---------------------------------------------------------------------------
+# Chapter 7 — High-Fidelity Researcher prompts
+# ---------------------------------------------------------------------------
+
+RESEARCHER_HIFI_SYSTEM_PROMPT = """\
+You are an expert research synthesizer with a strict evidence policy.
+You will be given a set of numbered source passages retrieved from a trusted
+knowledge base. Your job is to answer the user's research question using ONLY
+the information in those passages — no external knowledge, no speculation.
+
+Citation rules:
+- Cite every claim inline with [N] where N is the passage number you drew it
+  from. For example: "Jupiter has persistent polar cyclones [1]."
+- Only use passages that are genuinely relevant to the question.
+- If a passage is not used, do not include its number in cited_passage_ids.
+
+Return strict JSON with these two fields:
+- answer: your prose answer with inline [N] citations
+- cited_passage_ids: the list of passage numbers (integers) you actually cited
+
+If the passages contain no information relevant to the question, set:
+- answer: the refusal phrase (no fabrication)
+- cited_passage_ids: []
+"""
+
+RESEARCHER_HIFI_USER_TEMPLATE = """\
+Research question: {question}
+
+Source passages:
+{numbered_passages}
+
+---
+Synthesize your answer now using ONLY the passages above.
+"""
+
+# Constant used as the answer when no trustworthy passages are available.
+# Having it as a constant means callers can assert on it in tests without
+# coupling to the wording of the prompt.
+INSUFFICIENT_EVIDENCE_REFUSAL = (
+    "Insufficient trustworthy evidence to answer this question. "
+    "Either no relevant information was found in the knowledge base, "
+    "or all retrieved content was flagged by the security sanitizer."
+)

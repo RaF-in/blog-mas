@@ -30,7 +30,8 @@ INSTRUCTIONS:
 6. Multi-step blog generation typically goes: Intake -> Librarian and Researcher (in any order) -> Writer -> optionally Validator.
 7. For "rewrite in a different tone" goals, plan TWO Librarian retrievals (one per blueprint), TWO Writer steps (mode 1 then mode 2), then optionally Validator.
 8. TOKEN MANAGEMENT — When the user supplies a large document or text block, or when the Researcher output is likely to be very detailed, insert a Summarizer step between the Researcher and the Writer. Set "summary_objective" to a specific extraction goal, not just "summarize". Pass the Summarizer output to the Writer using the "summary_result" key.
-9. Output ONLY a valid JSON list. No prose, no markdown fences.
+9. CITATION CONTRACT (Chapter 7) — The Researcher agent now returns a CitedAnswer, not a ResearchSummary. Pass the Researcher output to the Writer using the "cited_answer" key (not "research_summary"). The Writer is trilingual: it handles cited_answer, summary_result, and research_summary, in that priority order.
+10. Output ONLY a valid JSON list. No prose, no markdown fences.
 
 EXAMPLE GOAL: "Write a casual blog about climate change for general readers."
 EXAMPLE PLAN:
@@ -38,8 +39,8 @@ EXAMPLE PLAN:
   {{"step": 1, "agent": "Intake", "input": {{"raw_input": "Write a casual blog about climate change for general readers."}}}},
   {{"step": 2, "agent": "Librarian", "input": {{"intent_query": "$$STEP_1_OUTPUT$$.intent_query"}}}},
   {{"step": 3, "agent": "Researcher", "input": {{"topic_query": "$$STEP_1_OUTPUT$$.topic_query", "blog_spec": "$$STEP_1_OUTPUT$$.blog_spec"}}}},
-  {{"step": 4, "agent": "Writer", "input": {{"blueprint": "$$STEP_2_OUTPUT$$", "research_summary": "$$STEP_3_OUTPUT$$", "blog_spec": "$$STEP_1_OUTPUT$$.blog_spec"}}}},
-  {{"step": 5, "agent": "Validator", "input": {{"draft": "$$STEP_4_OUTPUT$$", "research_summary": "$$STEP_3_OUTPUT$$"}}}}
+  {{"step": 4, "agent": "Writer", "input": {{"blueprint": "$$STEP_2_OUTPUT$$", "cited_answer": "$$STEP_3_OUTPUT$$", "blog_spec": "$$STEP_1_OUTPUT$$.blog_spec"}}}},
+  {{"step": 5, "agent": "Validator", "input": {{"draft": "$$STEP_4_OUTPUT$$", "research_summary": "$$STEP_3_OUTPUT$$.answer"}}}}
 ]
 
 EXAMPLE GOAL: "Write a technical deep-dive on space exploration, then rewrite it as a casual explainer."
@@ -48,10 +49,10 @@ EXAMPLE PLAN:
   {{"step": 1, "agent": "Intake", "input": {{"raw_input": "Write a technical deep-dive on space exploration."}}}},
   {{"step": 2, "agent": "Librarian", "input": {{"intent_query": "technical deep-dive blueprint"}}}},
   {{"step": 3, "agent": "Researcher", "input": {{"topic_query": "$$STEP_1_OUTPUT$$.topic_query", "blog_spec": "$$STEP_1_OUTPUT$$.blog_spec"}}}},
-  {{"step": 4, "agent": "Writer", "input": {{"blueprint": "$$STEP_2_OUTPUT$$", "research_summary": "$$STEP_3_OUTPUT$$", "blog_spec": "$$STEP_1_OUTPUT$$.blog_spec"}}}},
+  {{"step": 4, "agent": "Writer", "input": {{"blueprint": "$$STEP_2_OUTPUT$$", "cited_answer": "$$STEP_3_OUTPUT$$", "blog_spec": "$$STEP_1_OUTPUT$$.blog_spec"}}}},
   {{"step": 5, "agent": "Librarian", "input": {{"intent_query": "casual explainer blueprint"}}}},
   {{"step": 6, "agent": "Writer", "input": {{"blueprint": "$$STEP_5_OUTPUT$$", "previous_content": "$$STEP_4_OUTPUT$$", "blog_spec": "$$STEP_1_OUTPUT$$.blog_spec"}}}},
-  {{"step": 7, "agent": "Validator", "input": {{"draft": "$$STEP_6_OUTPUT$$", "research_summary": "$$STEP_3_OUTPUT$$"}}}}
+  {{"step": 7, "agent": "Validator", "input": {{"draft": "$$STEP_6_OUTPUT$$", "research_summary": "$$STEP_3_OUTPUT$$.answer"}}}}
 ]
 
 EXAMPLE GOAL: "First, summarize the following text about the Juno probe to extract only the key scientific mission facts and instruments. Then write a short, suspenseful blog post about the probe's arrival at Jupiter for a general audience.\\n\\n--- TEXT TO USE ---\\nJuno is a NASA space probe orbiting Jupiter, launched August 5, 2011. Its mission is to study Jupiter's origins, interior structure, deep atmosphere, and magnetosphere. Juno carries nine scientific instruments including microwave radiometer, magnetometer, and gravity science payload..."

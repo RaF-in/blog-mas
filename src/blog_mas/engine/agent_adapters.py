@@ -9,19 +9,33 @@ Chapter 6 §F — the Writer adapter is "bilingual": it accepts both a
 ResearchSummary (from the Researcher) and a SummaryResult (from the new
 Summarizer) for its `research_summary` slot.  Contract translation happens
 here, not inside write_node — keeping the core agent stable.
+
+Chapter 7 §H — the Writer adapter is upgraded to "trilingual": it now also
+accepts a CitedAnswer (from the new Hi-Fi Researcher).  The priority order
+for translation is:
+  cited_answer  (Ch 7 Hi-Fi Researcher — richest, has inline citations + sources)
+  → summary_result  (Ch 6 Summarizer)
+  → research_summary  (Ch 5 Researcher — plain bullets)
+The Writer's core (write_node) is never touched — contract translation
+happens only here, at the adapter boundary.
+
+Chapter 7 also swaps the engine Researcher to the hi-fi four-stage node while
+keeping the *linear* LangGraph orchestrator on the original research_node.
+This is the "engine-only upgrade" the plan specified — old flows continue to
+work without modification (§G backward compatibility).
 """
 
 import logging
 
 from blog_mas.agents.intake import intake_node
 from blog_mas.agents.librarian import librarian_node
-from blog_mas.agents.researcher import research_node
+from blog_mas.agents.researcher_hifi import cited_answer_to_research_summary, research_hifi_node
 from blog_mas.agents.summarizer import summarize_node
 from blog_mas.agents.validator import validate_node
 from blog_mas.agents.writer import write_node
 from blog_mas.engine.mcp_envelope import create_mcp_message
 from blog_mas.engine.registry import AgentRegistry
-from blog_mas.mcp.models import ResearchSummary, SummaryResult
+from blog_mas.mcp.models import CitedAnswer, ResearchSummary, SummaryResult
 from blog_mas.rag.blueprints import NEUTRAL_BLUEPRINT
 
 logger = logging.getLogger(__name__)
@@ -56,6 +70,12 @@ def make_librarian_handler(llm, store, embedder, reranker):
 
 
 def make_researcher_handler(llm, store, embedder, reranker):
+    """Chapter 7 — engine Researcher now routes through the hi-fi four-stage node.
+
+    The linear orchestrator still uses the original research_node (unchanged).
+    Only the engine path gets the upgrade: retrieve → sanitize → synthesize →
+    format.  Output contract changes from ResearchSummary to CitedAnswer.
+    """
     async def handler(msg: dict) -> dict:
         content = msg["content"]
         state = {
@@ -63,28 +83,48 @@ def make_researcher_handler(llm, store, embedder, reranker):
             "topic_query": content.get("topic_query"),
             "revision_count": 0,
         }
-        out = await research_node(state, _config(llm, store, embedder, reranker))
-        return create_mcp_message("Researcher", out["research_summary"])
+        out = await research_hifi_node(state, _config(llm, store, embedder, reranker))
+        # Emit CitedAnswer as a dict so the Executor stores plain JSON in
+        # step_outputs — same pattern as make_summarizer_handler.
+        cited_answer: CitedAnswer = out["cited_answer"]
+        return create_mcp_message("Researcher", cited_answer.model_dump())
     return handler
 
 
 def make_writer_handler(llm, store, embedder, reranker):
+    """Chapter 7 §H — trilingual Writer adapter.
+
+    Priority order for the research_summary slot:
+      1. cited_answer   (Ch 7 Hi-Fi Researcher — richest contract)
+      2. summary_result (Ch 6 Summarizer)
+      3. research_summary (Ch 5 Researcher — plain bullets, pass-through)
+
+    write_node is never touched.  All contract translation happens here.
+    """
     async def handler(msg: dict) -> dict:
         content = msg["content"]
         blueprint = content["blueprint"] or NEUTRAL_BLUEPRINT
         blog_spec = content["blog_spec"]
 
-        # Chapter 6 §F — bilingual Writer.
-        # The Researcher produces a ResearchSummary object.
-        # The Summarizer produces a SummaryResult object.
-        # write_node always expects a ResearchSummary, so we translate here at
-        # the adapter boundary rather than touching the core agent.
         research_summary = content.get("research_summary")
         previous_content = content.get("previous_content")
 
         if research_summary is None:
-            # Check if the plan routed a SummaryResult here instead.
-            # This is the "bilingual" pattern: same Writer, two upstream sources.
+            # Priority 1 — Chapter 7 CitedAnswer (new hi-fi Researcher output)
+            cited_answer = content.get("cited_answer")
+            if cited_answer is not None:
+                research_summary = cited_answer_to_research_summary(cited_answer)
+                sources = (
+                    cited_answer.get("sources", [])
+                    if isinstance(cited_answer, dict)
+                    else cited_answer.sources
+                )
+                logger.info(
+                    "[WriterAdapter] Received CitedAnswer — sources: %s", sources
+                )
+
+        if research_summary is None:
+            # Priority 2 — Chapter 6 SummaryResult (existing bilingual path)
             summary_result = content.get("summary_result")
             if summary_result is not None:
                 research_summary = _summary_result_to_research_summary(summary_result)
@@ -95,6 +135,8 @@ def make_writer_handler(llm, store, embedder, reranker):
                     if isinstance(summary_result, SummaryResult)
                     else 0,
                 )
+
+        # Priority 3 — research_summary already set (plain Ch 5 Researcher output)
 
         state = {
             "blog_spec": blog_spec,
@@ -216,22 +258,45 @@ def build_default_registry(llm, store, embedder, reranker) -> AgentRegistry:
     reg.register(
         "Researcher",
         make_researcher_handler(llm, store, embedder, reranker),
-        role="Retrieves and synthesizes factual information from the Qdrant knowledge collection.",
+        role=(
+            "Chapter 7 Hi-Fi Researcher: retrieves chunks, sanitizes for injection, "
+            "synthesizes with inline [N] citations, and appends a deterministic Sources list. "
+            "Returns a CitedAnswer — not a ResearchSummary. "
+            "Pass the output to Writer via the 'cited_answer' key."
+        ),
         inputs={
             "topic_query": "(String/Reference) The subject matter to research.",
             "blog_spec": "(Reference) The BlogSpec produced by Intake (provides topic, audience, goal context).",
         },
-        output="A ResearchSummary object containing topic, bullet_points, and source citations.",
+        output=(
+            "A CitedAnswer dict with keys: 'answer' (str with inline [N] cites), "
+            "'sources' (list[str] of doc names), 'passages_retrieved' (int), "
+            "'passages_used' (int), 'passages_rejected' (int). "
+            "Pass to Writer using the 'cited_answer' key."
+        ),
     )
 
     reg.register(
         "Writer",
         make_writer_handler(llm, store, embedder, reranker),
-        role="Generates or rewrites a blog draft. Has TWO modes — fresh generation from research, or rewriting an existing draft in a new style.",
+        role=(
+            "Generates or rewrites a blog draft. Chapter 7 upgrade: now TRILINGUAL — "
+            "accepts three research input shapes (priority order): "
+            "(1) cited_answer from the Hi-Fi Researcher, "
+            "(2) summary_result from the Summarizer, "
+            "(3) research_summary from the plain Researcher. "
+            "Also has rewrite mode via previous_content."
+        ),
         inputs={
             "blueprint": "(Reference) The Blueprint from a Librarian step (style instructions).",
             "blog_spec": "(Reference) The BlogSpec from Intake.",
-            "research_summary": "(Reference, OPTIONAL) ResearchSummary from a Researcher step. Use this for FRESH content generation.",
+            "cited_answer": (
+                "(Reference, OPTIONAL) CitedAnswer from a Chapter 7 Researcher step. "
+                "Use this for FRESH content when the Researcher ran in hi-fi mode. "
+                "Takes priority over research_summary and summary_result."
+            ),
+            "research_summary": "(Reference, OPTIONAL) ResearchSummary from a Chapter 5 Researcher step. Use this for FRESH content generation.",
+            "summary_result": "(Reference, OPTIONAL) SummaryResult from a Summarizer step. Use this when you ran a Summarizer before the Writer.",
             "previous_content": "(Reference, OPTIONAL) A prior BlogDraft from an earlier Writer step. Use this for REWRITING in a new style.",
         },
         output="A BlogDraft object with title, body, and word_count.",

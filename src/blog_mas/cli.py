@@ -10,6 +10,33 @@ from blog_mas.orchestrator import run_pipeline_async
 
 MAX_INPUT_LENGTH = 500
 
+# Chapter 6 demo — Juno probe text (mirrors the book's §3 Code Block 6 example).
+# Embedded here so `--demo-summarizer` works without user-supplied text.
+_JUNO_DEMO_TEXT = """\
+Juno is a NASA space probe orbiting the planet Jupiter. It was launched from Cape
+Canaveral Air Force Station on August 5, 2011, as part of the New Frontiers program.
+The spacecraft entered Jupiter orbit on July 4, 2016, after a five-year journey.
+Juno's primary mission is to investigate Jupiter's origins, interior structure, deep
+atmosphere and magnetosphere. The probe carries nine scientific instruments: a microwave
+radiometer (MWR) to probe below the cloud tops, a magnetometer (MAG), a gravity science
+radio instrument, an ultraviolet spectrograph (UVS), an infrared auroral mapper (JIRAM),
+the Jovian auroral distributions experiment (JADE) and three other particle detectors.
+A key discovery came in 2021 when Juno confirmed the existence of persistent cyclones at
+both poles, each thousands of kilometres wide. Measurements of Jupiter's gravitational
+field revealed an unexpectedly deep atmosphere where jet streams extend to depths of
+3,000 kilometres. The mission was extended twice — first in 2021 and again in 2025 —
+to allow observations of Ganymede, Europa, and Io. Total mission cost is approximately
+$1.1 billion. The probe completes one orbit every 53 days and transmits ~40 GB of data
+per orbit, all processed by the Deep Space Network.
+"""
+
+_JUNO_DEMO_GOAL = (
+    "First, summarize the following text about the Juno probe to extract only the key "
+    "scientific mission facts and instruments. Then write a short, suspenseful blog post "
+    "about the probe's dangerous arrival at Jupiter for a general audience.\n\n"
+    "--- TEXT TO USE ---\n" + _JUNO_DEMO_TEXT
+)
+
 
 def build_parser():
     parser = argparse.ArgumentParser(prog="blog-mas", description="Multi-agent blog generation system")
@@ -26,6 +53,17 @@ def build_parser():
         metavar="DIR",
         default=None,
         help="When --engine is set, save the execution trace JSON to this directory.",
+    )
+
+    # Chapter 6 demo flag
+    parser.add_argument(
+        "--demo-summarizer",
+        action="store_true",
+        help=(
+            "Chapter 6 demo: run a pre-canned Juno-probe goal through the Context Engine "
+            "to demonstrate the Summarizer agent and print token-reduction analytics. "
+            "Implies --engine."
+        ),
     )
 
     sub = parser.add_subparsers(dest="command")
@@ -173,7 +211,14 @@ async def _engine_loop(llm, store, embedder, save_trace_dir):
 
 
 def _display_engine_result(final, trace):
-    """Print the Context Engine result summary."""
+    """Print the Context Engine result summary.
+
+    Chapter 6 §7 — when a Summarizer step ran, compute_token_savings pulls
+    the efficiency metrics from the trace and prints them as a one-liner so
+    the business value is immediately visible: "Token reduction: 56.5% ...".
+    """
+    from blog_mas.tokens import compute_token_savings
+
     print()
     print("--- CONTEXT ENGINE RESULT ---")
     if trace.plan:
@@ -182,6 +227,25 @@ def _display_engine_result(final, trace):
             print(f"  Step {step['step']}: {step['agent']}")
     print(f"Status: {trace.status}")
     print(f"Duration: {trace.duration:.2f}s")
+
+    # Chapter 6 §7 — token-reduction analytics (only shown when Summarizer ran)
+    savings = compute_token_savings(trace)
+    if savings:
+        print()
+        print("--- TOKEN REDUCTION ANALYTICS ---")
+        for s in savings["summarizer_steps"]:
+            print(
+                f"  Step {s['step']} (Summarizer): "
+                f"{s['input_tokens']} → {s['output_tokens']} tokens  "
+                f"({s['reduction_percent']:.1f}% reduction)"
+            )
+        print(
+            f"  Overall: {savings['total_input_tokens']} → "
+            f"{savings['total_output_tokens']} tokens  "
+            f"({savings['overall_reduction_pct']:.1f}% reduction)"
+        )
+        print("---------------------------------")
+
     if final is not None:
         if hasattr(final, "title") and hasattr(final, "body"):
             print()
@@ -208,11 +272,51 @@ def main():
     elif args.command == "eval":
         from blog_mas.rag.ingest_cli import cmd_eval
         cmd_eval(args)
+    elif getattr(args, "demo_summarizer", False):
+        # Chapter 6 demo — run the Juno probe goal through the Context Engine.
+        # This is the book's §3 Code Block 6/7 made runnable as a CLI flag.
+        asyncio.run(_run_demo_summarizer(save_trace_dir=args.save_trace))
     else:
         asyncio.run(async_main(
             use_engine=args.engine,
             save_trace_dir=args.save_trace,
         ))
+
+
+async def _run_demo_summarizer(save_trace_dir=None):
+    """Chapter 6 demo: Summarizer → Writer pipeline on the Juno probe text.
+
+    Mirrors the book's §3 Code Block 6 example:
+      - Large technical text supplied directly in the goal
+      - Planner recognises it and routes through Summarizer → Writer
+      - Token-reduction analytics printed after the run
+
+    Run with:  uv run blog-mas --demo-summarizer
+    """
+    from blog_mas.engine.agent_adapters import build_default_registry
+    from blog_mas.engine.context_engine import run_context_engine
+    from blog_mas.rag.embedding import EmbeddingClient
+    from blog_mas.rag.vector_store import QdrantStore
+
+    llm = create_llm()
+    store = QdrantStore()
+    embedder = EmbeddingClient()
+    registry = build_default_registry(llm, store, embedder, reranker=None)
+
+    print("=" * 60)
+    print("  Chapter 6 Demo — Summarizer Agent")
+    print("=" * 60)
+    print()
+    print("Goal:")
+    print(_JUNO_DEMO_GOAL[:300] + "...\n")
+
+    final, trace = await run_context_engine(
+        goal=_JUNO_DEMO_GOAL,
+        registry=registry,
+        llm=llm,
+        save_trace_dir=save_trace_dir,
+    )
+    _display_engine_result(final, trace)
 
 
 if __name__ == "__main__":

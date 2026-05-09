@@ -73,3 +73,45 @@ class GoalDecomposition(BaseModel):
         if not v.strip():
             raise ValueError("must be non-empty")
         return v.strip()
+
+
+# ---------------------------------------------------------------------------
+# Chapter 6 — Summarizer agent models
+# ---------------------------------------------------------------------------
+
+class SummarizerInput(BaseModel):
+    """Input contract for the Summarizer agent.
+
+    Both fields are mandatory — the agent raises ValueError if either is absent
+    (guard-clause pattern from Chapter 5 §D data contracts).
+    """
+    text_to_summarize: str = Field(max_length=50_000)
+    summary_objective: str = Field(
+        max_length=500,
+        description=(
+            "A precise goal for the summary, e.g. "
+            "'Extract the names of all involved parties and the key financial figures.'"
+        ),
+    )
+
+
+class SummaryText(BaseModel):
+    """What the LLM returns: the raw summary string.
+
+    Kept separate from SummaryResult because the LLM can't know token counts —
+    those are computed after the fact in summarize_node.
+    """
+    summary: str = Field(max_length=5_000)
+
+
+class SummaryResult(BaseModel):
+    """Full output contract for the Summarizer agent.
+
+    Includes the business-value metrics from Chapter 6 §7 — input/output token
+    counts and reduction percentage — so the CLI can print a one-liner like
+    "Token reduction: 56.5% (1240 → 540 tokens)" without extra computation.
+    """
+    summary: str = Field(max_length=5_000)
+    input_tokens: int = Field(ge=0)
+    output_tokens: int = Field(ge=0)
+    reduction_percent: float = Field(ge=0.0, le=100.0)

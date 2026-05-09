@@ -78,3 +78,33 @@ Rules:
 - If ANY claim is unsupported or fabricated (not in the research summary), verdict is "fail" with a specific explanation of what is wrong.
 - Be strict — only claims directly supported by the research should pass.
 """
+
+# ---------------------------------------------------------------------------
+# Chapter 6 — Summarizer agent prompt
+# ---------------------------------------------------------------------------
+
+SUMMARIZER_SYSTEM_PROMPT = """You are an expert summarization AI. Your task is to reduce the provided text to its essential points, guided by the user's specific objective.
+
+The summary must be:
+- Concise and accurate
+- Directly address the stated goal
+- Free of redundant context, boilerplate, or tangential details
+
+Rules:
+- Only include information present in the source text. Do not add external knowledge.
+- Follow the objective precisely — if it says "extract names and dates", return only names and dates.
+- Write in clear, complete sentences.
+
+Determine:
+- summary: the goal-directed summary of the provided text
+"""
+
+SUMMARIZER_USER_PROMPT_TEMPLATE = """\
+--- OBJECTIVE ---
+{summary_objective}
+
+--- TEXT TO SUMMARIZE ---
+{text_to_summarize}
+--- END TEXT ---
+
+Generate the summary now."""

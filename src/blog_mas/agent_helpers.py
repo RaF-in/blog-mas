@@ -8,8 +8,13 @@ from langchain_core.output_parsers import PydanticOutputParser
 from pydantic import BaseModel
 
 from blog_mas.retry import retry_handler
+from blog_mas.tokens import count_tokens
 
 logger = logging.getLogger(__name__)
+
+# Warn when a single prompt exceeds this many tokens — not a hard block,
+# just the "fuel gauge" alarm from Chapter 5 §C.
+_TOKEN_WARN_THRESHOLD = 8_000
 
 _DIRECTIVE_PATTERNS = re.compile(
     r"^(Ignore|System:|You are|NEW INSTRUCTION|Forget|Disregard)",
@@ -38,9 +43,25 @@ async def run_agent_chain(
         HumanMessage(content=user_message),
     ]
 
+    # Chapter 5 §C — pre-flight token check.  We count the combined prompt so
+    # the logs show exactly how much "fuel" each agent call consumes.
+    prompt_tokens = count_tokens(full_prompt + user_message)
+    logger.info("[%s] Prompt tokens: %d", agent_name, prompt_tokens)
+    if prompt_tokens > _TOKEN_WARN_THRESHOLD:
+        logger.warning(
+            "[%s] Large prompt: %d tokens (threshold=%d). "
+            "Consider adding a Summarizer step upstream.",
+            agent_name, prompt_tokens, _TOKEN_WARN_THRESHOLD,
+        )
+
     result = await retry_handler(
         lambda: chain.ainvoke(messages), agent_name, max_retries, base_delay
     )
+
+    # Log output size so we can measure total consumption per step.
+    output_tokens = count_tokens(str(result))
+    logger.info("[%s] Output tokens: %d", agent_name, output_tokens)
+
     return result
 
 

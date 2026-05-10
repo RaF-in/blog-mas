@@ -1,0 +1,42 @@
+FOR IMMEDIATE RELEASE
+ChronoTech Unveils ChronoSSD X-Series — A New Era of Storage Performance
+
+San Jose, CA — March 18, 2026 — ChronoTech today announced the ChronoSSD
+X-Series, a line of high-performance NVMe solid-state drives engineered for
+creative professionals and demanding workloads. ChronoSSD X is available
+immediately in 1TB, 2TB, and 4TB capacities at retail and through
+ChronoTech's authorized partners.
+
+"With ChronoSSD X, we are redefining what storage means for the modern
+creator," said Jordan Reyes, CEO of ChronoTech. "Our customers told us they
+were tired of waiting on their tools. ChronoSSD X eliminates that wait."
+
+KEY MESSAGING THEMES:
+- "Creator-First" — every feature framed around the working creative
+- "Eliminate the wait" — speed positioned as time, not megabytes
+- "Reliability you can publish on" — trust and warranty as differentiators
+- "Built in California" — heritage and quality manufacturing emphasis
+
+PRODUCT HIGHLIGHTS (per ChronoTech's claims):
+- Sequential read speeds up to 7,200 MB/s
+- Sequential write speeds up to 6,800 MB/s
+- PCIe Gen 5 NVMe 2.0 interface
+- 5-year warranty with on-site replacement for studio customers
+- Proprietary "ChronoCool" thermal design
+
+PRICING (MSRP):
+- ChronoSSD X 1TB: $189
+- ChronoSSD X 2TB: $339
+- ChronoSSD X 4TB: $599
+
+POSITIONING NOTES (from public messaging):
+ChronoTech is positioning ChronoSSD X squarely against high-end NVMe drives
+from established storage brands. Their go-to-market emphasizes the on-site
+replacement program and a "creator community" partner network. They have
+not announced an 8TB SKU and have not published independent third-party
+benchmark results.
+
+About ChronoTech:
+Founded in 2018, ChronoTech designs and manufactures storage solutions for
+creative professionals. The company is headquartered in San Jose, California.
+Press contact: press@chronotech.example.

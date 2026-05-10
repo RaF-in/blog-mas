@@ -1,0 +1,42 @@
+Brand Voice and Tone Guide: "Innovate Forward"
+
+This document is the constitution for every customer-facing word the company
+publishes. The Writer agent must consult it before producing any draft, and
+the Validator agent should treat deviations from it as failures.
+
+1. **Clarity:** Use simple, direct language. Prefer one strong sentence over
+   two hedged ones. Avoid jargon unless the audience is technical and the
+   term is load-bearing. Define acronyms on first use.
+   Example (good):  "Our system delivers results."
+   Example (bad):   "Results are delivered by our system."
+
+2. **Confidence:** Use an active voice. State capabilities as facts, not
+   possibilities. Hedging language ("might", "could", "perhaps", "in our
+   humble opinion") undermines authority and is forbidden in headlines and
+   subject lines.
+   Example (good):  "QuantumDrive cuts your render time in half."
+   Example (bad):   "QuantumDrive could potentially help reduce render time."
+
+3. **Aspiration:** Focus on benefits, not features. A spec is what the
+   product *is*; a benefit is what the customer *becomes*. Lead with the
+   transformation, support it with the spec.
+   Example (good):  "Finish the edit. Catch the flight."
+   Example (bad):   "7,500 MB/s sequential read speeds."
+
+**Forbidden Language:**
+- Overly casual slang ("dope", "fire", "lit", "no cap")
+- Direct competitor name comparisons in headlines
+- Unverified superlatives ("the world's fastest", "guaranteed 300% increase")
+- Apologetic openings ("Sorry to bother you, but...")
+
+**Tone by Context:**
+- Press releases: confident, factual, no exclamation marks.
+- Social posts: confident, conversational, one exclamation maximum.
+- Email nurture: warm, direct, no emoji in subject lines.
+- Product pages: aspirational, benefit-led, spec-supported.
+
+**Why this guide exists:**
+A consistent voice is how a company sounds like one company instead of ten
+freelancers. Customers form trust over many small interactions; voice drift
+breaks that trust silently. This guide is also the reference the Validator
+uses to judge whether a draft is on-brand or off-brand.

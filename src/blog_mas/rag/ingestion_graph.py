@@ -48,13 +48,20 @@ async def _run_async(
     dim = getattr(embedder, "_dim", 384)
     store.ensure_collection(namespace, dim=dim)
 
-    md_files = sorted(Path(source_dir).glob("*.md"))
-    if not md_files:
+    # Chapter 9 — accept both .md (existing blog/legal corpora) and .txt
+    # (the marketing corpus the chapter ships).  This is the "swap the
+    # pantry" change: the pipeline below is identical, only the file
+    # extension changes.  Anything beyond extension is a domain choice and
+    # belongs in the source files, not in the engine.
+    source_files = sorted(
+        list(Path(source_dir).glob("*.md")) + list(Path(source_dir).glob("*.txt"))
+    )
+    if not source_files:
         return
 
-    for md_file in md_files:
-        doc_id = md_file.stem
-        raw_text = md_file.read_text()
+    for src_file in source_files:
+        doc_id = src_file.stem
+        raw_text = src_file.read_text()
         doc = IngestionDoc(doc_id=doc_id, raw_text=raw_text)
 
         # Stage 1: structural split

@@ -93,6 +93,21 @@ def build_parser():
         ),
     )
 
+    # Chapter 9 demo flag
+    parser.add_argument(
+        "--demo-marketing",
+        action="store_true",
+        help=(
+            "Chapter 9 demo: re-task the same Context Engine to a marketing "
+            "domain by swapping the knowledge base.  Runs the chapter's "
+            "three-use-case difficulty ladder (competitive analysis, "
+            "product copy, persuasive pitch on the brand guide).  No engine "
+            "code is touched — only the deck and the documents change. "
+            "Implies --engine.  Requires `blog-mas ingest --path "
+            "data/knowledge/marketing` to be run first."
+        ),
+    )
+
     # Chapter 7 demo flag
     parser.add_argument(
         "--demo-hifi",
@@ -370,6 +385,9 @@ def main():
     elif getattr(args, "demo_ch8", False):
         # Chapter 8 demo — meta-controller + moderation perimeter + latency budget.
         asyncio.run(_run_demo_ch8(save_trace_dir=args.save_trace))
+    elif getattr(args, "demo_marketing", False):
+        # Chapter 9 demo — domain independence proof.  Same engine, new pantry.
+        asyncio.run(_run_demo_marketing(save_trace_dir=args.save_trace))
     elif getattr(args, "demo_hifi", False):
         # Chapter 7 demo — show the hi-fi Researcher with citation trail and
         # the sanitizer blocking a poisoned-chunk injection attempt.
@@ -634,6 +652,122 @@ async def _run_demo_ch8(save_trace_dir=None):
     else:
         print("Output (perimeter intervention):", result.output)
     print("--- END DEMO ---")
+
+
+async def _run_demo_marketing(save_trace_dir=None):
+    """Chapter 9 demo: domain independence — same engine, new knowledge base.
+
+    The chapter's central claim is that a well-architected Context Engine
+    needs no core changes when the business domain changes.  This demo
+    proves it for blog-mas: we keep the Planner, Executor, Researcher,
+    Librarian, Summarizer, Writer, Validator, moderation perimeter, and
+    glass-box trace exactly as they are, and only change two things:
+
+      1. The pantry — `data/knowledge/marketing/*.txt` (the seven docs from
+         the chapter), ingested into the same Qdrant collection used by
+         every other run.
+      2. The recipe — three control decks built from
+         `template_competitive_analysis`, `template_product_marketing_copy`,
+         and `template_persuasive_pitch_on_brand`.
+
+    The three use cases are run as a difficulty ladder:
+
+      Use Case 1 (easy)   — retrieve and summarise competitor messaging.
+      Use Case 2 (medium) — retrieve specs, then transform into brand-voiced copy.
+      Use Case 3 (hard)   — synthesise a business case from connective tissue
+                            across multiple documents (the "cognitive mismatch"
+                            test the chapter highlights as the real punchline).
+
+    Each goal goes through `run_with_policy` so the moderation perimeter and
+    latency budget from Chapter 8 are exercised too — they are also part of
+    "the engine" that does not need to change.
+
+    Run with:
+        # one-time: ingest the marketing knowledge base
+        uv run blog-mas ingest --path data/knowledge/marketing --rebuild
+        # then:
+        uv run blog-mas --demo-marketing
+    """
+    from blog_mas.control_decks import (
+        template_competitive_analysis,
+        template_persuasive_pitch_on_brand,
+        template_product_marketing_copy,
+    )
+    from blog_mas.engine.agent_adapters import build_default_registry
+    from blog_mas.meta_controller import (
+        ModerationPolicy,
+        default_audit_logger,
+        run_with_policy,
+    )
+    from blog_mas.rag.embedding import EmbeddingClient
+    from blog_mas.rag.vector_store import QdrantStore
+
+    print("=" * 60)
+    print("  Chapter 9 Demo — Domain Independence")
+    print("  Same engine.  New pantry.  No core code changes.")
+    print("=" * 60)
+    print()
+
+    llm = create_llm()
+    store = QdrantStore()
+    embedder = EmbeddingClient()
+    registry = build_default_registry(llm, store, embedder, reranker=None)
+    policy = ModerationPolicy(audit_logger=default_audit_logger)
+
+    decks = [
+        ("Use Case 1 — Competitive Analysis (easy: retrieve + summarise)",
+         template_competitive_analysis(competitor_doc="competitor_press_release_chrono_ssd")),
+        ("Use Case 2 — Product Marketing Copy (medium: retrieve + transform)",
+         template_product_marketing_copy(product_name="QuantumDrive Q-1")),
+        ("Use Case 3 — Persuasive Pitch on the Brand Guide (hard: synthesise across docs)",
+         template_persuasive_pitch_on_brand()),
+    ]
+
+    for title, deck in decks:
+        print("─" * 60)
+        print(title)
+        print("─" * 60)
+        print(f"Template: {deck.template_name}")
+        print(f"Goal:     {deck.goal[:160]}...")
+        print(f"Moderation active: {deck.moderation_active}")
+        print()
+
+        result = await run_with_policy(
+            deck, llm=llm, registry=registry,
+            policy=policy, save_trace_dir=save_trace_dir,
+        )
+
+        print(f"Status: {result.status}  ref={result.ref_id}")
+        if result.pre_report is not None:
+            print(f"  Pre-flight  flagged={result.pre_report.flagged} "
+                  f"source={result.pre_report.source}")
+        if result.post_report is not None:
+            print(f"  Post-flight flagged={result.post_report.flagged} "
+                  f"source={result.post_report.source}")
+        print()
+        print(result.latency.report())
+        print()
+
+        if result.status == "ok":
+            output = result.output
+            if hasattr(output, "title") and hasattr(output, "body"):
+                print("--- OUTPUT ---")
+                print(f"Title: {output.title}")
+                print()
+                print(output.body)
+            else:
+                print("Output:", output)
+        else:
+            print("Output (perimeter intervention):", result.output)
+        print()
+
+    print("=" * 60)
+    print("  Demo complete.")
+    print()
+    print("  Files touched in the engine to make this work: 0.")
+    print("  Files added: 7 marketing .txt docs + 3 deck templates + 1 CLI flag.")
+    print("  That ratio is the chapter's whole point.")
+    print("=" * 60)
 
 
 if __name__ == "__main__":

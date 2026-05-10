@@ -1,0 +1,55 @@
+Email Nurture Sequence Outline — QuantumDrive Q-1
+
+Audience: Pre-order list and newsletter subscribers who have not purchased.
+Cadence: 5 emails over 14 days, triggered by signup or pre-order page visit.
+Owner: lifecycle@company.example
+Last reviewed: 2026-03-30
+
+EMAIL 1 — WELCOME (Day 0)
+Subject:   Welcome to the Q-1 list.
+Goal:      Set the tone, deliver the first piece of value, no ask.
+Hook:      One sentence that frames the brand promise ("Finish faster").
+Body:      Short. Two paragraphs. Link to the spec sheet for the curious;
+           don't push it on the curious-not-yet.
+CTA:       Soft — "reply and tell us what you're working on."
+
+EMAIL 2 — THE PROBLEM, NAMED (Day 2)
+Subject:   The wait is the problem.
+Goal:      Show the customer we understand what slows them down.
+Hook:      A real creator quote about timeline stutter (Maria R., colorist).
+Body:      Paint the picture of what a slow drive costs in time, focus,
+           and money. No product mention until paragraph 3.
+CTA:       "See how Q-1 changes that" → product page.
+
+EMAIL 3 — WHAT'S DIFFERENT (Day 5)
+Subject:   8TB. Gen 5. 6,000 TBW.
+Goal:      The factual case. Specs, but framed as benefits.
+Hook:      One headline number tied to one workflow win.
+Body:      Three bullets, each pairing a spec with a benefit. End with the
+           5-year warranty as the trust anchor.
+CTA:       "Pre-order now" → pre-order page.
+
+EMAIL 4 — CREATOR PROOF (Day 9)
+Subject:   How Maria finishes a 4-hour grade in two.
+Goal:      Social proof. Move logical buyers into emotional commitment.
+Hook:      Customer mini-case-study, ideally video.
+Body:      Quote-led. Minimal product copy. Let the customer do the work.
+CTA:       "Read the full story" → blog / case study.
+
+EMAIL 5 — LAST CALL (Day 14)
+Subject:   Pre-orders close Friday.
+Goal:      Convert the fence-sitters with scarcity (real, not manufactured).
+Hook:      Direct, no-frills. The brand voice's "confidence" rule applies.
+Body:      Three lines. Deadline. Benefit recap. Link.
+CTA:       "Pre-order before Friday" → pre-order page.
+
+GUARDRAILS
+- No emoji in subject lines (per brand style guide).
+- Never use "guaranteed" without legal review.
+- Sequence pauses on purchase — buyer should not receive emails 4 or 5.
+- All emails carry a one-click unsubscribe; treat opt-out as the win it is.
+
+WHY THIS SEQUENCE EXISTS
+A nurture sequence is the bridge between "interested" and "committed".
+The brand voice guide defines *how* we speak; this outline defines *when*
+and *in what order*. Both are needed; neither alone is enough.

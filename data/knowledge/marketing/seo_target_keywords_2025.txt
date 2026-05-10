@@ -1,0 +1,44 @@
+SEO Target Keywords — 2026 (rolling)
+
+This file lists the keywords the marketing team is actively trying to rank
+for. Generated copy should weave these in naturally — never stuffed,
+never at the cost of clarity. Treat the priority tiers as guidance, not
+quotas.
+
+PRIORITY TIER 1 (must appear in launch copy)
+- fastest nvme ssd for video editing
+- pcie gen 5 ssd 8tb
+- best ssd for 8k video
+- ssd for davinci resolve
+- nvme ssd for 3d rendering
+
+PRIORITY TIER 2 (use opportunistically)
+- m.2 2280 gen 5 ssd
+- ssd with hardware encryption
+- 5 year warranty ssd
+- ssd for blender rendering
+- best ssd for premiere pro 2026
+
+PRIORITY TIER 3 (long-tail, blog and tutorial content)
+- how to choose an nvme ssd for video editing
+- pcie gen 4 vs gen 5 ssd for creators
+- ssd endurance tbw explained
+- nvme thermal throttling video workflow
+
+NEGATIVE KEYWORDS (do not target)
+- cheap ssd
+- gaming ssd (we do not currently position for gamers)
+- crypto storage (off-strategy)
+- ssd liquidation deals
+
+CONTENT-TO-KEYWORD MAPPING
+- Product page         → tier 1
+- Launch press release → tier 1 + tier 2
+- Email nurture        → tier 2 + tier 3
+- Blog / tutorial      → tier 3 dominant
+- Social posts         → tier 1 fragments only
+
+GOVERNANCE
+- This list is reviewed quarterly. Don't trust it past 2026-Q3.
+- Keyword research lives in the SEO team's shared workbook.
+- Disputed terms are resolved by the SEO lead, not the writer.

@@ -1,0 +1,48 @@
+Product Specification Sheet: Project QuantumDrive
+
+This document is the single source of truth for product facts. The Writer
+must never invent numbers; if a number is not in this sheet, it does not
+exist. Last verified: 2026-04-01.
+
+Product Name: QuantumDrive Q-1
+Product Family: QuantumDrive
+Form Factor: M.2 2280
+Storage Capacity: 2TB, 4TB, 8TB
+Sequential Read Speed: up to 7,500 MB/s
+Sequential Write Speed: up to 7,000 MB/s
+Random Read (4K): up to 1,200,000 IOPS
+Random Write (4K): up to 1,100,000 IOPS
+Interface: NVMe 2.0, PCIe Gen 5 x4
+Endurance (TBW): 1,500 (2TB) / 3,000 (4TB) / 6,000 (8TB)
+MTBF: 2,000,000 hours
+Warranty: 5 years limited
+Operating Temperature: 0°C to 70°C
+Power Consumption: 7.5W typical, 9.5W peak
+Encryption: AES-256 hardware encryption, TCG Opal 2.0
+Controller: Phison E26 with custom QuantumDrive firmware
+DRAM Cache: 4GB LPDDR4 (8TB variant)
+SLC Cache: Dynamic, up to 25% of free capacity
+
+Pricing (MSRP, USD):
+- QD-Q1-2TB: $249
+- QD-Q1-4TB: $449
+- QD-Q1-8TB: $799
+
+Target Customers:
+- Professional video editors working in 8K / RAW workflows
+- 3D artists running real-time rendering and asset streaming
+- Photographers handling 100MP+ RAW catalogues
+- Game developers compiling large engines and asset bundles
+
+Compatibility:
+- Windows 11 23H2 and later
+- macOS 14.0 and later (via Thunderbolt 4 enclosure for Apple Silicon)
+- Linux kernel 6.5+
+
+Notes:
+- The 2TB variant has lower TBW endurance and is positioned for prosumers,
+  not 24/7 professional rigs. Marketing copy targeting studios should
+  default to the 4TB or 8TB SKUs.
+- Sequential read speeds require a PCIe Gen 5 motherboard. On Gen 4 systems
+  the drive operates at up to 7,000 MB/s read. State this clearly in
+  technical copy; omit only in lifestyle / aspirational copy.

@@ -1,0 +1,47 @@
+Social Media Campaign Brief: QuantumDrive Q-1 Launch — Q1 2026
+
+Campaign Name: "Finish Faster"
+Launch Window: 2026-04-15 through 2026-06-30
+Owner: marketing@company.example
+Status: Approved
+
+OBJECTIVE
+Drive 50,000 product detail page visits and 4,000 pre-orders during the
+launch window. Build a category narrative that QuantumDrive is the
+default storage choice for serious creative professionals.
+
+PRIMARY AUDIENCE
+- Professional video editors (DaVinci Resolve, Premiere Pro power users)
+- 3D artists and motion designers (Cinema 4D, Blender, Houdini)
+- Photographers shooting 100MP+ medium format
+- Studio IT decision-makers buying drives in volume
+
+SECONDARY AUDIENCE
+- Prosumer creators (YouTube production, freelancers)
+- PC enthusiast / hardware reviewer community
+
+KEY MESSAGES (in priority order)
+1. Time is the real bottleneck. QuantumDrive gives you that time back.
+2. Studio-grade endurance, not consumer-grade compromise.
+3. PCIe Gen 5 performance with a 5-year warranty.
+
+CHANNELS AND CADENCE
+- LinkedIn: 3 posts/week, decision-maker tone, case studies
+- X/Twitter: 5 posts/week, short benchmarks, creator quotes
+- YouTube: 6 short-form videos, real workflow demos
+- Reddit (r/editors, r/3Dmodeling): organic engagement only, no ad copy
+
+TONE
+Confident and aspirational, per the brand style guide. Lead with what the
+creator can now *do*, not with the spec sheet. Specs are the supporting
+evidence, never the headline.
+
+DO NOT
+- Compare directly to ChronoSSD X by name in headlines
+- Use the word "guaranteed" without legal review
+- Post benchmarks without a link to the methodology
+
+SUCCESS CRITERIA
+- Pre-orders: 4,000 by 2026-06-30
+- Earned media mentions: 25 from tier-1 creator publications
+- Brand-tracking lift on "fastest creative storage": +15 points

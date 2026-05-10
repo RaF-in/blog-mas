@@ -1,0 +1,49 @@
+Customer Interview Notes — Maria R.
+Date: 2026-02-12
+Interviewer: Priya S. (UX research)
+Format: 45-minute remote, recorded with consent
+Participant: Maria R., freelance colorist, Lisbon, 9 years experience
+
+PARTICIPANT CONTEXT
+Maria works on commercial spots and short documentaries. Typical project
+involves 8K BRAW footage and DaVinci Resolve color grading. Solo operator.
+Currently uses two Samsung 980 Pro 2TB drives in a Thunderbolt enclosure.
+
+VERBATIM QUOTES (selected)
+
+On her current pain points:
+"The wait is what kills me. I scrub the timeline and it stutters. Every
+stutter pulls me out of the work. I lose the eye for what I was doing."
+
+"I bill by the project, not the hour. So 'faster drive' isn't a luxury for
+me, it's directly more money. Or directly more sleep. Either is fine."
+
+On what she would actually pay for:
+"Honestly the spec sheet doesn't sell me. I want to see another colorist
+say 'I edited this Apple commercial on it and the timeline never dropped a
+frame.' That's the thing."
+
+"Endurance scares me more than speed now. My last drive died at 18 months
+and I lost two days of work. I want a number I can trust for five years."
+
+On marketing language she ignores:
+"Anything with 'unleash' or 'revolutionary'. I scroll past. I want
+specifics. Numbers. A real workflow."
+
+"Brands that compare themselves to other brands look insecure. Just tell
+me what *you* do."
+
+On price sensitivity:
+"I'd pay $200 more for a drive I don't have to think about. The cheap
+drive isn't cheap if it costs me a Saturday rebuilding a project."
+
+INTERVIEWER NOTES
+- Maria is the prototype "studio-of-one" persona. Strong signal that
+  endurance and reliability beat raw speed in purchase intent.
+- The "show me a working pro using it" desire is a campaign hint:
+  testimonials > benchmarks for this segment.
+- She rejected hyperbolic copy unprompted. Good independent confirmation
+  of the brand style guide's "no overly casual slang / no unverified
+  superlatives" rules.
+- Her question "what's the TBW for the 4TB" went unanswered on a
+  competitor's product page. Make sure ours surfaces it.

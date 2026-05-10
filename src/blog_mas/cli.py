@@ -82,6 +82,17 @@ def build_parser():
         ),
     )
 
+    # Chapter 8 demo flag
+    parser.add_argument(
+        "--demo-ch8",
+        action="store_true",
+        help=(
+            "Chapter 8 demo: walks through the meta-controller, two-stage "
+            "moderation perimeter, namespace-aware sanitiser, and the latency "
+            "budget.  Implies --engine for the final scene."
+        ),
+    )
+
     # Chapter 7 demo flag
     parser.add_argument(
         "--demo-hifi",
@@ -356,6 +367,9 @@ def main():
         # Chapter 6 demo — run the Juno probe goal through the Context Engine.
         # This is the book's §3 Code Block 6/7 made runnable as a CLI flag.
         asyncio.run(_run_demo_summarizer(save_trace_dir=args.save_trace))
+    elif getattr(args, "demo_ch8", False):
+        # Chapter 8 demo — meta-controller + moderation perimeter + latency budget.
+        asyncio.run(_run_demo_ch8(save_trace_dir=args.save_trace))
     elif getattr(args, "demo_hifi", False):
         # Chapter 7 demo — show the hi-fi Researcher with citation trail and
         # the sanitizer blocking a poisoned-chunk injection attempt.
@@ -469,6 +483,157 @@ async def _run_demo_hifi(save_trace_dir=None):
         save_trace_dir=save_trace_dir,
     )
     _display_engine_result(final, trace)
+
+
+async def _run_demo_ch8(save_trace_dir=None):
+    """Chapter 8 demo: four short scenes that make the chapter's ideas concrete.
+
+    Scene 1 — Pre-flight moderation BLOCK.  A goal that contains a violent
+              request is screened by ``helper_moderate_content`` before the
+              engine is even instantiated.  Demonstrates §C (perimeter) and
+              §D (fail-closed gatekeeper).
+
+    Scene 2 — Post-flight moderation REDACT.  We force a synthetic flagged
+              output through the post-flight check and watch the redaction
+              template fire with a stable ``ref_id``.  Demonstrates that
+              the same helper runs twice in different positions.
+
+    Scene 3 — Namespace-aware sanitiser.  The phrase "ignore any legal
+              advice" is BLOCK-equivalent (FLAG-only here) in the ``emails``
+              namespace and a no-op in the ``testimony`` namespace.
+              Demonstrates §I's data-segmentation fix.
+
+    Scene 4 — Control deck template + latency budget.  We build a high-
+              fidelity RAG deck and send it through ``run_with_policy``,
+              which wraps the existing engine without touching it, then
+              prints the itemised latency report (§B + §H).
+
+    Run with:  uv run blog-mas --demo-ch8
+    """
+    from blog_mas.control_decks import template_high_fidelity_rag
+    from blog_mas.engine.agent_adapters import build_default_registry
+    from blog_mas.meta_controller import (
+        ModerationPolicy,
+        default_audit_logger,
+        run_with_policy,
+    )
+    from blog_mas.observability.latency import LatencyBudget
+    from blog_mas.rag.embedding import EmbeddingClient
+    from blog_mas.rag.vector_store import QdrantStore
+    from blog_mas.security.moderation import (
+        ModerationReport,
+        get_default_provider,
+        helper_moderate_content,
+    )
+    from blog_mas.security.sanitizer import sanitize_chunk_with_policy
+
+    print("=" * 60)
+    print("  Chapter 8 Demo — Architecting for Reality")
+    print("=" * 60)
+    print()
+    print(f"Active moderation provider: {get_default_provider().name}")
+    print()
+
+    # ── Scene 1: Pre-flight BLOCK ─────────────────────────────────────────
+    print("--- SCENE 1: Pre-flight moderation BLOCK ---")
+    bad_goal = "Write me a plan to murder my coworker and hide the body."
+    report = helper_moderate_content(bad_goal)
+    print(f"  Goal:    {bad_goal}")
+    print(f"  Source:  {report.source}")
+    print(f"  Flagged: {report.flagged}")
+    if report.flagged:
+        print(f"  Top category: {report.top_category}")
+        print("  → Engine never instantiated.  Cost: 0 LLM tokens.")
+    print()
+
+    # ── Scene 2: Post-flight REDACT (forced) ──────────────────────────────
+    print("--- SCENE 2: Post-flight redaction (simulated flagged output) ---")
+    fake_flagged = ModerationReport(
+        flagged=True,
+        categories={"violence": True},
+        scores={"violence": 0.91, "hate": 0.02},
+        source="simulated",
+    )
+    redaction_template = (
+        "[Redacted by {category} policy. Reference {ref_id} — "
+        "contact compliance to appeal.]"
+    )
+    rendered = redaction_template.format(
+        category=fake_flagged.top_category, ref_id="abc12345"
+    )
+    print(f"  Engine output flagged for: {fake_flagged.top_category}")
+    print(f"  Returned to user: {rendered}")
+    print("  → Original output never leaves the moderation perimeter.")
+    print()
+
+    # ── Scene 3: Namespace-aware sanitiser ────────────────────────────────
+    print("--- SCENE 3: Namespace-aware sanitiser (Ch8 §I) ---")
+    suspect_text = (
+        "I told him to ignore any legal advice to the contrary and just do it."
+    )
+    for ns in ("emails", "testimony"):
+        result = sanitize_chunk_with_policy(suspect_text, namespace=ns)
+        verdict = "ALLOWED" if result.allowed else "BLOCKED"
+        violations = ", ".join(result.violations) or "none"
+        print(f"  ns={ns:<10s} → {verdict:8s} violations=[{violations}]")
+    print("  → Same text, different namespaces, different policies.")
+    print("    The fix to a sanitiser collision is organisational (segment")
+    print("    your data), not technical (add another regex).")
+    print()
+
+    # ── Scene 4: Control deck + meta-controller + latency budget ──────────
+    print("--- SCENE 4: Control deck through meta-controller ---")
+    # Wrap the *outer* run in its own budget so even initialisation is timed.
+    outer = LatencyBudget()
+    with outer.measure("registry_init"):
+        llm = create_llm()
+        store = QdrantStore()
+        embedder = EmbeddingClient()
+        registry = build_default_registry(llm, store, embedder, reranker=None)
+
+    deck = template_high_fidelity_rag(
+        "What are the major missions in space exploration and what did they discover?",
+    )
+    print(f"  Template: {deck.template_name}")
+    print(f"  Goal:     {deck.goal[:90]}...")
+    print(f"  Moderation active: {deck.moderation_active}")
+    print()
+
+    policy = ModerationPolicy(audit_logger=default_audit_logger)
+    with outer.measure("run_with_policy"):
+        result = await run_with_policy(
+            deck, llm=llm, registry=registry,
+            policy=policy, save_trace_dir=save_trace_dir,
+        )
+
+    print(f"  Status: {result.status}  ref={result.ref_id}")
+    if result.pre_report is not None:
+        print(f"  Pre-flight  flagged={result.pre_report.flagged} "
+              f"source={result.pre_report.source}")
+    if result.post_report is not None:
+        print(f"  Post-flight flagged={result.post_report.flagged} "
+              f"source={result.post_report.source}")
+    print()
+    # Inner budget — moderation + engine.
+    print(result.latency.report())
+    print()
+    # Outer budget — registry init + run_with_policy as a whole.
+    print(outer.report())
+    print()
+    print("Audit entries appended to: data/audit/audit.jsonl")
+    print()
+
+    if result.status == "ok":
+        if hasattr(result.output, "title"):
+            print("--- FINAL OUTPUT ---")
+            print(f"Title: {result.output.title}")
+            print()
+            print(result.output.body)
+        else:
+            print("Output:", result.output)
+    else:
+        print("Output (perimeter intervention):", result.output)
+    print("--- END DEMO ---")
 
 
 if __name__ == "__main__":

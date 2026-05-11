@@ -1,0 +1,61 @@
+# =============================================================================
+# Ch10 §1.6 — HPA: API service autoscaling
+#
+# Ch10: "Horizontal Pod Autoscaler (HPA): Kubernetes automatically adjusts
+# the number of API and Worker Pods based on CPU utilisation or custom metrics
+# (such as the task queue length)."
+#
+# API pods scale on CPU and request rate.  Under normal load, 3 replicas are
+# sufficient.  During traffic spikes (e.g. a marketing campaign triggering
+# bulk blog-generation requests), K8s scales up automatically.
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: blog-mas-api-hpa
+  namespace: blog-mas-prod
+  labels:
+    app.kubernetes.io/name: blog-mas
+    app.kubernetes.io/component: api
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: blog-mas-api
+
+  minReplicas: 3
+  maxReplicas: 12
+
+  metrics:
+    # Primary signal: CPU utilisation (built-in, no custom metrics adapter needed).
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70   # scale up when CPU > 70% across all API pods
+
+    # Secondary signal: memory (API processes can grow with concurrent sessions).
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+
+  behavior:
+    # Scale up quickly to handle traffic spikes.
+    scaleUp:
+      stabilizationWindowSeconds: 30
+      policies:
+        - type: Pods
+          value: 3
+          periodSeconds: 60   # add up to 3 pods per minute
+
+    # Scale down slowly to avoid flapping.
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 5-minute cooling period
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 60   # remove at most 1 pod per minute

@@ -137,6 +137,30 @@ def build_parser():
     p_eval = sub.add_parser("eval", help="Run recall evaluation")
     p_eval.add_argument("--queries", default=None, help="Path to queries JSON")
 
+    # Chapter 10 — production API server
+    p_serve = sub.add_parser(
+        "serve",
+        help=(
+            "Ch10: Start the production FastAPI service (uvicorn). "
+            "Exposes POST /api/v1/execute, GET /api/v1/status/{id}, "
+            "GET /metrics, GET /healthz, GET /readyz."
+        ),
+    )
+    p_serve.add_argument(
+        "--host", default="0.0.0.0", help="Bind host (default: 0.0.0.0)"
+    )
+    p_serve.add_argument(
+        "--port", type=int, default=8000, help="Bind port (default: 8000)"
+    )
+    p_serve.add_argument(
+        "--reload", action="store_true",
+        help="Enable uvicorn auto-reload (development only).",
+    )
+    p_serve.add_argument(
+        "--workers", type=int, default=1,
+        help="Number of uvicorn worker processes (use 1 with --reload).",
+    )
+
     return parser
 
 
@@ -378,6 +402,8 @@ def main():
     elif args.command == "eval":
         from blog_mas.rag.ingest_cli import cmd_eval
         cmd_eval(args)
+    elif args.command == "serve":
+        _cmd_serve(args)
     elif getattr(args, "demo_summarizer", False):
         # Chapter 6 demo — run the Juno probe goal through the Context Engine.
         # This is the book's §3 Code Block 6/7 made runnable as a CLI flag.
@@ -768,6 +794,45 @@ async def _run_demo_marketing(save_trace_dir=None):
     print("  Files added: 7 marketing .txt docs + 3 deck templates + 1 CLI flag.")
     print("  That ratio is the chapter's whole point.")
     print("=" * 60)
+
+
+def _cmd_serve(args) -> None:
+    """Chapter 10 — start the production FastAPI service via uvicorn.
+
+    This is the CLI entry point described in Ch10 §1.2.  The Dockerfile.api
+    CMD calls uvicorn directly; this subcommand is for local convenience.
+
+    Run:
+        uv run blog-mas serve
+        uv run blog-mas serve --port 8080 --reload   (development)
+    """
+    try:
+        import uvicorn  # type: ignore[import]
+    except ImportError:
+        print(
+            "ERROR: uvicorn is not installed.  "
+            "Install the production dependencies:\n"
+            "  uv sync --extra prod\n"
+            "or:  pip install uvicorn[standard]"
+        )
+        raise SystemExit(1)
+
+    print("=" * 60)
+    print("  Chapter 10 — Context Engine Service")
+    print(f"  Listening on http://{args.host}:{args.port}")
+    print("  API docs:    http://localhost:{}/docs".format(args.port))
+    print("  Metrics:     http://localhost:{}/metrics".format(args.port))
+    print("  Health:      http://localhost:{}/healthz".format(args.port))
+    print("=" * 60)
+
+    uvicorn.run(
+        "blog_mas.service.api:app",
+        host=args.host,
+        port=args.port,
+        reload=args.reload,
+        workers=args.workers if not args.reload else 1,
+        log_config=None,   # structlog handles logging; suppress uvicorn's default config
+    )
 
 
 if __name__ == "__main__":

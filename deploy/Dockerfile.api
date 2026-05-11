@@ -1,0 +1,75 @@
+# =============================================================================
+# Ch10 §1.5 — API service Docker image
+#
+# Ch10: "Docker allows the entire application—including the Python runtime,
+# required libraries, and configuration—to be packaged into a standardised
+# image.  Each container runs identically, whether on a developer's laptop
+# or in a cloud cluster."
+#
+# Build:
+#   docker build -f deploy/Dockerfile.api -t blog-mas-api:latest .
+#
+# Run (local, without Compose):
+#   docker run -p 8000:8000 --env-file .env blog-mas-api:latest
+# =============================================================================
+
+# Stage 1 — dependency installer
+# Using python:3.13-slim (the book uses 3.11-slim; we match the project's
+# requires-python constraint in pyproject.toml).
+FROM python:3.13-slim AS builder
+
+# Install uv for fast dependency resolution (matches the project's build backend).
+RUN pip install --no-cache-dir uv
+
+WORKDIR /app
+
+# Copy only the dependency files first to maximise Docker layer caching.
+# Requirements change less frequently than source code.
+COPY pyproject.toml uv.lock ./
+
+# Install ALL dependencies (core + prod group) into /app/.venv.
+# The prod group adds fastapi, uvicorn, celery, redis, prometheus-client, otel.
+RUN uv sync --frozen --group prod
+
+# Stage 2 — runtime image (lean, no build tools)
+FROM python:3.13-slim AS runtime
+
+WORKDIR /app
+
+# Copy the virtual environment from the builder stage.
+COPY --from=builder /app/.venv /app/.venv
+
+# Copy application source code.
+COPY src/ ./src/
+
+# Non-root user — security best practice for container workloads.
+RUN useradd --system --uid 1001 --no-create-home appuser
+USER appuser
+
+# The virtual environment must be on PATH so uvicorn is found.
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/src"
+
+# The application reads configuration from environment variables (Ch10 §1.1).
+# Do NOT embed API keys here — inject them via K8s Secret / docker --env-file.
+ENV ENV=production
+ENV LOG_FORMAT=json
+ENV LOG_LEVEL=INFO
+
+# Port the API listens on.  Matches K8s service-api.yaml containerPort.
+EXPOSE 8000
+
+# Liveness and readiness probes (K8s deployment-api.yaml) hit these paths:
+#   GET /healthz  → liveness
+#   GET /readyz   → readiness
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://localhost:8000/healthz')"
+
+# Ch10 §1.5: "Run the API server using Uvicorn."
+# --workers 1: in K8s we scale with replicas, not in-process threads.
+# The HPA in k8s/hpa-api.yaml adds/removes pods based on CPU utilisation.
+CMD ["uvicorn", "blog_mas.service.api:app", \
+     "--host", "0.0.0.0", \
+     "--port", "8000", \
+     "--workers", "1", \
+     "--log-config", "/dev/null"]

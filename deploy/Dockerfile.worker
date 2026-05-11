@@ -1,0 +1,60 @@
+# =============================================================================
+# Ch10 §1.5 — Celery worker Docker image
+#
+# Ch10: "The same image can be reused to start worker processes that execute
+# asynchronous tasks."
+#
+# In this implementation we use a SEPARATE Dockerfile rather than the same
+# image with a different CMD, because:
+#  • Workers don't need the web server port exposed.
+#  • Workers may need different HEALTHCHECK logic (process-based, not HTTP).
+# However the source code, Python version, and dependencies are IDENTICAL —
+# demonstrating the ch10 principle that the same codebase runs everywhere.
+#
+# Build:
+#   docker build -f deploy/Dockerfile.worker -t blog-mas-worker:latest .
+#
+# Run (local):
+#   docker run --env-file .env blog-mas-worker:latest
+# =============================================================================
+
+FROM python:3.13-slim AS builder
+
+RUN pip install --no-cache-dir uv
+WORKDIR /app
+COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --group prod
+
+FROM python:3.13-slim AS runtime
+
+WORKDIR /app
+COPY --from=builder /app/.venv /app/.venv
+COPY src/ ./src/
+
+RUN useradd --system --uid 1001 --no-create-home appuser
+USER appuser
+
+ENV PATH="/app/.venv/bin:$PATH"
+ENV PYTHONPATH="/app/src"
+ENV ENV=production
+ENV LOG_FORMAT=json
+ENV LOG_LEVEL=INFO
+
+# Ch10 §1.5: "Command to start the worker"
+# Ch10's exact example: celery -A tasks worker --loglevel=INFO
+# We add --concurrency to match WORKER_CONCURRENCY (also set in config.py).
+# The HPA in k8s/hpa-worker.yaml scales the NUMBER OF PODS, not concurrency
+# inside a pod — keeping per-pod concurrency fixed makes latency predictable.
+CMD ["celery", \
+     "-A", "blog_mas.workers.celery_app", \
+     "worker", \
+     "--loglevel=INFO", \
+     "--concurrency=4", \
+     "--without-heartbeat", \
+     "--without-mingle"]
+
+# Worker health check via Celery's own inspect mechanism.
+# K8s uses this as the liveness probe command (see deployment-worker.yaml).
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+  CMD celery -A blog_mas.workers.celery_app inspect ping -d "celery@$$HOSTNAME" \
+      || exit 1

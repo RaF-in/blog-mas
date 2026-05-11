@@ -1,0 +1,14 @@
+# =============================================================================
+# Ch10 §1.6 — Kubernetes namespace
+#
+# All blog-mas resources live in the blog-mas-prod namespace, isolating them
+# from other workloads in the cluster (network policies, RBAC, quotas apply
+# at namespace level in enterprise clusters).
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: blog-mas-prod
+  labels:
+    app.kubernetes.io/name: blog-mas
+    environment: production

@@ -1,0 +1,72 @@
+# =============================================================================
+# Ch10 §1.4 — OpenTelemetry Collector configuration
+#
+# Ch10: "Distributed tracing tools such as Jaeger or Zipkin make these flows
+# visible end to end.  By linking each component's spans under a shared trace
+# ID, tracing exposes bottlenecks and highlights where latency is introduced
+# across the distributed workflow."
+#
+# Data flow:
+#   blog-mas api/worker (OTLP SDK)
+#       → otel-collector (this file, OTLP gRPC receiver on :4317)
+#           → Jaeger (Thrift/HTTP on :14250)
+#           → Prometheus (expose collector metrics on :8888)
+#
+# Mount this file at /etc/otelcol-contrib/config.yaml (done in docker-compose.yml).
+# =============================================================================
+
+receivers:
+  # Accept OTLP spans from FastAPI and Celery workers.
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317    # used by opentelemetry-exporter-otlp in tracing.py
+      http:
+        endpoint: 0.0.0.0:4318
+
+processors:
+  # Batch spans before exporting to reduce network round-trips.
+  batch:
+    send_batch_size: 512
+    timeout: 5s
+
+  # Memory limiter prevents the collector from being OOM-killed under load.
+  memory_limiter:
+    limit_mib: 256
+    spike_limit_mib: 64
+    check_interval: 1s
+
+  # Add resource attributes (service name, environment) to every span.
+  resource:
+    attributes:
+      - key: deployment.environment
+        value: "local"
+        action: insert
+
+exporters:
+  # Jaeger all-in-one instance (from docker-compose.yml).
+  # Ch10: "Distributed tracing tools such as Jaeger or Zipkin"
+  otlp/jaeger:
+    endpoint: jaeger:4317
+    tls:
+      insecure: true   # TLS terminated at the load balancer in production.
+
+  # Expose collector's own operational metrics for Prometheus to scrape.
+  prometheus:
+    endpoint: "0.0.0.0:8888"
+
+  # Debug logging — remove in production to avoid verbose span output.
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, batch, resource]
+      exporters: [otlp/jaeger, debug]
+
+    metrics:
+      receivers: [otlp]
+      processors: [memory_limiter, batch]
+      exporters: [prometheus]

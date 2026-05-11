@@ -20,6 +20,9 @@ class ExecutionTrace:
         self.started_at = datetime.utcnow().isoformat()
         self.start_time = time.time()
         self.duration = None
+        # Ch10 §1.3 — queue/worker correlation metadata injected by the task layer.
+        # Callers set this after construction; engine code ignores it.
+        self.metadata: dict = {}
 
     def log_plan(self, plan):
         self.plan = plan
@@ -50,6 +53,8 @@ class ExecutionTrace:
             "final_output": self.final_output,
             "started_at": self.started_at,
             "duration_seconds": self.duration,
+            # Ch10 §1.3 — correlation metadata (task_id, worker_id, queue).
+            "metadata": self.metadata,
         }
 
     def save(self, directory: str | Path) -> Path:

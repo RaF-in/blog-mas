@@ -25,6 +25,29 @@ dependencies = [
 [dependency-groups]
 dev = ["pytest>=9.0.3", "pytest-asyncio>=1.3.0"]
 
+# ── Chapter 10 production dependencies ────────────────────────────────────────
+# Install with:  uv sync --group prod
+# Kept as a separate group so the development environment stays lean.
+prod = [
+    # Ch10 §1.2 — FastAPI orchestration layer
+    "fastapi>=0.115.0",
+    "uvicorn[standard]>=0.32.0",
+
+    # Ch10 §1.3 — Celery async task queue + Redis broker/result-backend
+    "celery>=5.4.0",
+    "redis>=5.0.0",
+
+    # Ch10 §1.4 — Prometheus metrics
+    "prometheus-client>=0.21.0",
+
+    # Ch10 §1.4 — Distributed tracing (OpenTelemetry → OTLP → Jaeger)
+    "opentelemetry-api>=1.27.0",
+    "opentelemetry-sdk>=1.27.0",
+    "opentelemetry-exporter-otlp>=1.27.0",
+    "opentelemetry-instrumentation-fastapi>=0.48b0",
+    "opentelemetry-instrumentation-httpx>=0.48b0",
+]
+
 [project.scripts]
 blog-mas = "blog_mas.cli:main"
 

@@ -1,0 +1,72 @@
+# =============================================================================
+# Ch10 §1.4 — Prometheus scrape configuration
+#
+# Ch10: "Prometheus acts as an open source monitoring system and time-series
+# database, scraping data from the application's /metrics endpoint."
+#
+# Mount this file into the prometheus container (done in docker-compose.yml).
+# In K8s, use a ConfigMap (see k8s/configmap.yaml).
+# =============================================================================
+
+global:
+  scrape_interval: 15s        # How often to scrape each target.
+  evaluation_interval: 15s    # How often to evaluate alerting rules.
+  external_labels:
+    environment: "local"
+    service: "blog-mas"
+
+# ── Scrape targets ───────────────────────────────────────────────────────────
+
+scrape_configs:
+
+  # Ch10 §1.4 — The primary target: the FastAPI /metrics endpoint.
+  # Prometheus scrapes this to get:
+  #   • Application metrics: request latency, error rates, throughput
+  #   • AI-specific metrics: token consumption, LLM call latency, vector query latency
+  #   • Moderation / sanitizer counters (security observability)
+  #   • Task queue length gauge (feeds the HPA custom metric)
+  - job_name: "blog-mas-api"
+    static_configs:
+      - targets: ["api:8000"]
+    metrics_path: "/metrics"
+    scrape_interval: 15s
+
+  # The OTel Collector exposes its own operational metrics on port 8888.
+  - job_name: "otel-collector"
+    static_configs:
+      - targets: ["otel-collector:8888"]
+    scrape_interval: 30s
+
+  # Prometheus self-monitoring.
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+    scrape_interval: 30s
+
+# ── Alerting rules (skeleton — expand per operational requirements) ──────────
+#
+# Example alerts that map directly to Ch10's monitoring concerns:
+#
+# - alert: HighLLMTokenConsumption
+#   expr: rate(llm_tokens_total[5m]) > 10000
+#   for: 2m
+#   labels:
+#     severity: warning
+#   annotations:
+#     summary: "LLM token rate exceeds 10k/5m (cost alert)"
+#
+# - alert: ModerationBlockSpiking
+#   expr: rate(moderation_blocks_total[5m]) > 5
+#   for: 1m
+#   labels:
+#     severity: critical
+#   annotations:
+#     summary: "Moderation block rate spiking — possible adversarial input"
+#
+# - alert: TaskQueueBacklog
+#   expr: task_queue_length > 50
+#   for: 5m
+#   labels:
+#     severity: warning
+#   annotations:
+#     summary: "Task queue backlog growing — consider scaling workers"

@@ -1,0 +1,59 @@
+# =============================================================================
+# Ch10 §1.1 / §1.6 — Kubernetes ConfigMap (non-secret configuration)
+#
+# Ch10: "ConfigMaps and Secrets: Used to inject configuration and secrets
+# (integrating with the centralised secret stores mentioned in §1.1.2)."
+#
+# Non-sensitive settings live here.  Sensitive values (API keys, passwords)
+# live in secret.yaml (or, better, in HashiCorp Vault / AWS Secrets Manager
+# fetched by an ExternalSecrets operator at runtime).
+# =============================================================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: blog-mas-config
+  namespace: blog-mas-prod
+  labels:
+    app.kubernetes.io/name: blog-mas
+    app.kubernetes.io/component: config
+data:
+  # Ch10 §1.1 — runtime environment tag drives startup validation in config.py.
+  ENV: "production"
+
+  # Logging — JSON in production so ELK/Splunk can parse entries.
+  LOG_LEVEL: "INFO"
+  LOG_FORMAT: "json"
+
+  # LLM models — override without rebuilding the image.
+  GENERATION_MODEL: "gpt-4o"
+  EMBEDDING_MODEL: "text-embedding-3-small"
+
+  # Ch10 §2.1 — proactive context-reduction policy thresholds.
+  SUMMARIZER_TRIGGER_TOKENS: "4000"
+  MAX_INPUT_TOKENS: "32000"
+
+  # Vector store — point at the in-cluster Qdrant service.
+  QDRANT_URL: "http://qdrant:6333"
+  QDRANT_COLLECTION: "blog-mas-knowledge"
+  BLUEPRINT_COLLECTION: "blog-mas-blueprints"
+  RETRIEVAL_TOP_K: "5"
+  INGEST_SANITIZATION_ENABLED: "true"
+
+  # Task queue — point at the in-cluster Redis service.
+  REDIS_URL: "redis://redis:6379/0"
+  CELERY_BROKER_URL: "redis://redis:6379/0"
+  RESULT_BACKEND_URL: "redis://redis:6379/1"
+  RESULT_TTL_SECONDS: "86400"
+  WORKER_CONCURRENCY: "4"
+  MAX_TASK_RETRIES: "3"
+
+  # Security defaults.
+  API_PREFLIGHT_MODERATION: "true"
+
+  # Tracing — Ch10 §1.4.
+  OTEL_ENABLED: "true"
+  OTEL_EXPORTER_OTLP_ENDPOINT: "http://otel-collector:4317"
+  OTEL_SERVICE_NAME: "blog-mas"
+
+  # Trace persistence path inside the container.
+  TRACE_STORE_DIR: "/app/data/traces"

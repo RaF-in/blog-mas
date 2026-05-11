@@ -1,0 +1,79 @@
+# =============================================================================
+# Ch10 §1.6 — HPA: Worker autoscaling on task queue length (custom metric)
+#
+# Ch10: "Horizontal Pod Autoscaler (HPA): Kubernetes automatically adjusts
+# the number of API and Worker Pods based on CPU utilisation or CUSTOM METRICS
+# (such as the task queue length).  If the queue grows long, K8s spins up
+# more Worker Pods to process the goals faster."
+#
+# Worker pods scale on the CELERY QUEUE LENGTH — the most direct signal of
+# actual workload demand.  CPU is a lagging indicator; queue depth is a leading
+# indicator.
+#
+# Prerequisites:
+#   1. Prometheus Adapter (or KEDA) must be installed to expose the custom metric.
+#   2. The 'task_queue_length' gauge is published by the API's /metrics endpoint
+#      (see service/metrics.py::update_queue_length).
+#   3. The Prometheus Adapter maps it to the external metrics API as
+#      'custom.metrics.k8s.io/task_queue_length'.
+#
+# Alternative: replace the external metric section with a KEDA ScaledObject
+# for a simpler Redis-native queue depth trigger (no Prometheus Adapter needed).
+# =============================================================================
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: blog-mas-worker-hpa
+  namespace: blog-mas-prod
+  labels:
+    app.kubernetes.io/name: blog-mas
+    app.kubernetes.io/component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: blog-mas-worker
+
+  minReplicas: 2    # always keep at least 2 workers available
+  maxReplicas: 20   # hard cap to avoid runaway scaling
+
+  metrics:
+    # Primary signal: task queue length (Ch10's explicit example).
+    # Each worker processes 4 concurrent tasks (WORKER_CONCURRENCY=4).
+    # At queue depth 40, we need 10 workers → averageValue: 4.
+    - type: External
+      external:
+        metric:
+          name: task_queue_length
+          selector:
+            matchLabels:
+              queue: celery
+        target:
+          type: AverageValue
+          averageValue: "4"   # 1 worker per 4 queued tasks
+
+    # Fallback signal: CPU (covers CPU-intensive tasks where queue depth is low).
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 75
+
+  behavior:
+    # Workers scale up FAST — queue depth signals real user demand.
+    scaleUp:
+      stabilizationWindowSeconds: 0    # no delay; act on first signal
+      policies:
+        - type: Pods
+          value: 5
+          periodSeconds: 30   # add up to 5 pods every 30 seconds
+
+    # Workers scale down SLOWLY — in-flight tasks take minutes.
+    # Termination grace period (120s in deployment-worker.yaml) lets tasks finish.
+    scaleDown:
+      stabilizationWindowSeconds: 600  # 10-minute cooling period
+      policies:
+        - type: Pods
+          value: 1
+          periodSeconds: 120

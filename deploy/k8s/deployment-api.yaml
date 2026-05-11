@@ -1,0 +1,131 @@
+# =============================================================================
+# Ch10 §1.6 — Kubernetes Deployment: API service
+#
+# Ch10: "Deployments: Define the desired state (e.g., run 3 replicas of the
+# API image and 5 replicas of the Worker image)."
+#
+# This deployment manages the FastAPI orchestration layer (Dockerfile.api).
+# The HPA (hpa-api.yaml) adjusts the replica count automatically based on
+# CPU utilisation and request rate.
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blog-mas-api
+  namespace: blog-mas-prod
+  labels:
+    app.kubernetes.io/name: blog-mas
+    app.kubernetes.io/component: api
+spec:
+  # Initial replica count.  HPA will adjust this at runtime.
+  replicas: 3
+
+  selector:
+    matchLabels:
+      app: blog-mas-api
+
+  strategy:
+    # RollingUpdate: replaces pods gradually so the service stays available.
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1         # at most 1 extra pod during rollout
+      maxUnavailable: 0   # zero downtime: never go below 3 available pods
+
+  template:
+    metadata:
+      labels:
+        app: blog-mas-api
+      annotations:
+        # Tell Prometheus to scrape this pod's /metrics endpoint directly.
+        # Ch10 §1.4: Prometheus scrapes /metrics from the application.
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
+
+    spec:
+      # Non-root user matches the USER directive in Dockerfile.api.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+
+      containers:
+        - name: api
+          image: blog-mas-api:latest
+          imagePullPolicy: Always
+
+          ports:
+            - containerPort: 8000
+              name: http
+
+          # Configuration from ConfigMap (non-sensitive).
+          envFrom:
+            - configMapRef:
+                name: blog-mas-config
+
+          # Sensitive credentials from Secret.
+          # Ch10 §1.1: "Kubernetes … ConfigMaps and Secrets: Used to inject
+          # configuration and secrets (integrating with the centralised secret
+          # stores mentioned in §1.1.2)."
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: blog-mas-secrets
+                  key: OPENAI_API_KEY
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: blog-mas-secrets
+                  key: HF_TOKEN
+            - name: API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: blog-mas-secrets
+                  key: API_KEY
+            - name: WEBHOOK_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: blog-mas-secrets
+                  key: WEBHOOK_SECRET
+
+          # Probes — K8s uses these to know when a pod is alive and ready.
+          # Ch10 §1.6: api.py exposes /healthz (liveness) and /readyz (readiness).
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 20
+            periodSeconds: 15
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+
+          volumeMounts:
+            - name: trace-storage
+              mountPath: /app/data/traces
+            - name: audit-storage
+              mountPath: /app/data/audit
+
+      volumes:
+        # Shared PVC for ExecutionTrace persistence (the immutable audit log).
+        # Ch10 §2.2: traces must outlive any single pod.
+        - name: trace-storage
+          persistentVolumeClaim:
+            claimName: blog-mas-traces-pvc
+        - name: audit-storage
+          persistentVolumeClaim:
+            claimName: blog-mas-audit-pvc

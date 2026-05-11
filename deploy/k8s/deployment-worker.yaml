@@ -1,0 +1,114 @@
+# =============================================================================
+# Ch10 §1.6 — Kubernetes Deployment: Celery worker pool
+#
+# Ch10: "Define the desired state (e.g., run 3 replicas of the API image and
+# 5 replicas of the Worker image)."
+#
+# Workers have no Service — they pull from the Redis queue rather than
+# accepting inbound connections.  The HPA (hpa-worker.yaml) scales them
+# based on the CELERY QUEUE LENGTH custom metric.
+#
+# Ch10: "Horizontal Pod Autoscaler (HPA): Kubernetes automatically adjusts
+# the number of API and Worker Pods based on CPU utilisation or custom metrics
+# (such as the task queue length).  If the queue grows long, K8s spins up
+# more Worker Pods to process the goals faster."
+# =============================================================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: blog-mas-worker
+  namespace: blog-mas-prod
+  labels:
+    app.kubernetes.io/name: blog-mas
+    app.kubernetes.io/component: worker
+spec:
+  # Initial replica count.  hpa-worker.yaml takes over at runtime.
+  replicas: 5
+
+  selector:
+    matchLabels:
+      app: blog-mas-worker
+
+  strategy:
+    # RollingUpdate: in-flight tasks finish before old workers are terminated.
+    # acks_late=True in celery_app.py ensures tasks are re-queued if a pod
+    # is killed before it finishes.
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 2
+      maxUnavailable: 1
+
+  template:
+    metadata:
+      labels:
+        app: blog-mas-worker
+
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1001
+
+      # Graceful shutdown: let in-flight tasks finish before terminating.
+      # SIGTERM → Celery warm shutdown → tasks complete → pod exits.
+      terminationGracePeriodSeconds: 120
+
+      containers:
+        - name: worker
+          image: blog-mas-worker:latest
+          imagePullPolicy: Always
+
+          # Workers inherit the same config as the API.
+          envFrom:
+            - configMapRef:
+                name: blog-mas-config
+
+          env:
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: blog-mas-secrets
+                  key: OPENAI_API_KEY
+            - name: HF_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: blog-mas-secrets
+                  key: HF_TOKEN
+
+          # Worker liveness: uses Celery's inspect ping command.
+          # If a worker is alive and consuming, this returns 200.
+          livenessProbe:
+            exec:
+              command:
+                - "celery"
+                - "-A"
+                - "blog_mas.workers.celery_app"
+                - "inspect"
+                - "ping"
+                - "-d"
+                - "celery@$(HOSTNAME)"
+            initialDelaySeconds: 60
+            periodSeconds: 30
+            failureThreshold: 3
+            timeoutSeconds: 10
+
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "1Gi"
+            limits:
+              cpu: "2000m"
+              memory: "3Gi"
+
+          volumeMounts:
+            - name: trace-storage
+              mountPath: /app/data/traces
+            - name: audit-storage
+              mountPath: /app/data/audit
+
+      volumes:
+        - name: trace-storage
+          persistentVolumeClaim:
+            claimName: blog-mas-traces-pvc
+        - name: audit-storage
+          persistentVolumeClaim:
+            claimName: blog-mas-audit-pvc

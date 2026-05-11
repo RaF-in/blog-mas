@@ -1,0 +1,108 @@
+# =============================================================================
+# Ch10 §1.6 — Kubernetes Ingress: external access + API gateway concerns
+#
+# Ch10: "Ingress: Manages external access to the services, integrating with
+# the cloud provider's load balancer."
+#
+# Ch10 §1.2 — API gateway cross-cutting concerns:
+#   • Authentication and authorization (API keys, OAuth tokens, JWTs)
+#   • Rate limiting and throttling
+#   • SSL termination (handling HTTPS encryption)
+#
+# This Ingress wires to AWS ALB / GKE Cloud Load Balancer / nginx, and
+# Kong/Istio annotations enforce the auth + rate-limit concerns described in
+# the chapter.  The service-level auth.py provides a defence-in-depth second
+# layer (not the primary enforcement point).
+#
+# Replace 'api.blog-mas.example.com' with your real hostname.
+# =============================================================================
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: blog-mas-ingress
+  namespace: blog-mas-prod
+  labels:
+    app.kubernetes.io/name: blog-mas
+  annotations:
+    # ── TLS / SSL termination ────────────────────────────────────────────────
+    # Ch10 §1.2: "SSL termination: Handling HTTPS encryption."
+    # cert-manager issues a Let's Encrypt certificate automatically.
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+
+    # ── Rate limiting ────────────────────────────────────────────────────────
+    # Ch10 §1.2: "Rate limiting and throttling: Protecting the engine from
+    # excessive load or denial-of-service attacks."
+    # nginx ingress rate limiting (adjust for Kong/Istio annotations as needed).
+    nginx.ingress.kubernetes.io/limit-rps: "20"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+
+    # ── Authentication at the gateway ───────────────────────────────────────
+    # Ch10 §1.2: "Authentication and authorization: Validating API keys, OAuth
+    # tokens, or JWTs to ensure only authorised clients can access the engine."
+    #
+    # Option A (nginx + external-auth): forward to an auth service.
+    # nginx.ingress.kubernetes.io/auth-url: "https://auth.internal/validate"
+    #
+    # Option B (Kong plugin — replace with IngressClass: kong):
+    # konghq.com/plugins: blog-mas-key-auth
+    #
+    # Option C (Istio AuthorizationPolicy — replace Ingress with VirtualService):
+    # Defined separately in an AuthorizationPolicy resource.
+
+    # ── Upstream timeouts ────────────────────────────────────────────────────
+    # Engine tasks are long-running.  The API returns 202 immediately, so the
+    # Ingress does not need a long proxy timeout for the /execute endpoint.
+    # Status polling (/status) is fast (<100ms).
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+
+    # ── CORS (if browser clients call the API directly) ──────────────────────
+    nginx.ingress.kubernetes.io/enable-cors: "true"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://your-frontend.example.com"
+
+spec:
+  ingressClassName: nginx   # or "alb" for AWS, "gce" for GKE
+
+  tls:
+    - hosts:
+        - api.blog-mas.example.com
+      secretName: blog-mas-tls-cert   # created by cert-manager
+
+  rules:
+    - host: api.blog-mas.example.com
+      http:
+        paths:
+          # Public API
+          - path: /api/
+            pathType: Prefix
+            backend:
+              service:
+                name: blog-mas-api
+                port:
+                  name: http
+
+          # Prometheus metrics — restrict to internal cluster access only
+          # in production (do NOT expose publicly).  Here for completeness.
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: blog-mas-api
+                port:
+                  name: http
+
+          # Health and readiness probes for load balancer health checks.
+          - path: /healthz
+            pathType: Exact
+            backend:
+              service:
+                name: blog-mas-api
+                port:
+                  name: http
+          - path: /readyz
+            pathType: Exact
+            backend:
+              service:
+                name: blog-mas-api
+                port:
+                  name: http

@@ -1,0 +1,30 @@
+# =============================================================================
+# Ch10 §1.6 — Kubernetes Service: stable network endpoint for the API pods
+#
+# Ch10: "Services: Provide a stable network endpoint to access the API pods."
+#
+# ClusterIP exposes the API within the cluster.  External traffic enters via
+# the Ingress (ingress.yaml), which terminates TLS and routes to this Service.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: blog-mas-api
+  namespace: blog-mas-prod
+  labels:
+    app.kubernetes.io/name: blog-mas
+    app.kubernetes.io/component: api
+  annotations:
+    # Tell Prometheus to also scrape via this service (alternative to pod annotations).
+    prometheus.io/scrape: "true"
+    prometheus.io/port: "8000"
+    prometheus.io/path: "/metrics"
+spec:
+  type: ClusterIP
+  selector:
+    app: blog-mas-api
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8000
+      protocol: TCP
